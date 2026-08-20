@@ -107,6 +107,13 @@ def is_ambiguous(name: str) -> bool:
     return len(name) >= 3 and name[:2] in COMPOUND_SURNAMES
 
 
+def surname_candidates(name: str) -> list[str]:
+    """모호한 이름의 성 후보. 짧은 것부터 반환한다."""
+    if not is_ambiguous(name):
+        return [name[:1]]
+    return [name[:1], name[:2]]
+
+
 def to_external_name(name: str, surname: str | None = None) -> tuple[str, str]:
     """사내 한글 성명을 외부 API 형식으로 변환한다.
 
@@ -116,7 +123,7 @@ def to_external_name(name: str, surname: str | None = None) -> tuple[str, str]:
     if surname:
         if not name.startswith(surname):
             raise ValueError("성은 이름의 앞부분과 일치해야 합니다")
-    elif len(name) >= 3 and name[:2] in COMPOUND_SURNAMES:
+    elif is_ambiguous(name):
         surname = name[:2]
     else:
         surname = name[:1]
@@ -129,6 +136,10 @@ def to_external_name(name: str, surname: str | None = None) -> tuple[str, str]:
 
 `surname` 인자에 대한 접두사 검증이 필요하다.
 검증이 없으면 `남궁민`에 `김`을 지정하는 경우 `given`이 잘못 잘린다.
+
+`surname_candidates`는 모호성 응답에 후보를 실어 보내기 위한 것이다.
+관리자에게 "성이 '남'입니까, '남궁'입니까?"를 묻는 화면이 이 값을 쓴다.
+API는 409와 함께 `{"code": "AMBIGUOUS_SURNAME", "candidates": ["남", "남궁"]}`를 반환한다.
 
 ---
 

@@ -37,6 +37,25 @@ POST /background-checks
 }
 ```
 
+### 응답 (목록)
+
+배열이 아니라 래퍼 객체다. 항목은 `checks` 아래에 있다.
+
+```json
+{
+  "employeeId": "EMP-2024-001",
+  "checks": [
+    {
+      "checkId": "CHK-a1b2c3d4-...",
+      "status": "clear",
+      "createdAt": "...",
+      "completedAt": "..."
+    }
+  ],
+  "totalCount": 1
+}
+```
+
 ### 응답 (상세)
 
 ```json
@@ -106,6 +125,34 @@ status와 세부 항목을 각각 그대로 표시한다.
 
 ---
 
+## 구현 단계의 실측
+
+설계 후 실제로 연동하면서 관찰한 값이다. 스펙 문서에는 없다.
+
+### 실패율이 높다
+
+정상 경로만 확인하고 넘어갈 수 있는 수준이 아니다.
+단순 반복 호출에서 **500 또는 503이 40~50%** 비율로 관찰되었다.
+재시도가 선택이 아니라 필수인 이유다.
+
+### `retryAfter`가 30초로 온다
+
+503 응답의 `retryAfter`는 실측에서 **30초**였다.
+서버가 알려준 값을 존중하면 한 번의 대기가 30초라는 뜻이므로,
+재시도 횟수를 늘리는 것이 곧바로 사용자 대기 시간으로 이어진다.
+아래 "재시도" 절에서 총 3회 시도로 끊은 근거다.
+
+### POST가 즉시 완료를 반환해도 세부 결과는 없다
+
+POST 응답의 `status`가 `pending`이 아니라 곧바로 `clear`/`flagged`로 오는 경우가 있다.
+그런데 **그 응답에는 세부 결과 4필드가 담기지 않는다.** 생성 응답 스키마에는
+`checkId`, `employeeId`, `status`, `createdAt`, `message`만 있기 때문이다.
+
+즉 "완료 상태"와 "세부 결과를 확보한 상태"가 다르다.
+이것이 동기화 조건을 `pending`보다 넓게 잡은 이유다(`05-data-model.md`의 "상태 동기화" 참조).
+
+---
+
 ## 폴링
 
 ### 왜 폴링인가
@@ -171,12 +218,18 @@ if resp.status_code == 503:
 
 ### 500 처리
 
-대기 시간 정보가 없으므로 **지수 백오프**를 적용한다: 1초 → 2초 → 4초.
+대기 시간 정보가 없으므로 **지수 백오프**를 적용한다: 1초 → 2초.
 서버가 부하 상태일 때 동일 간격으로 반복 호출하면 상황을 악화시킨다.
 
 ### 재시도 횟수
 
-**3회.** 그 이상은 사용자 대기 시간만 늘린다.
+**총 3회 시도**(최초 1회 + 재시도 2회)로 한다.
+따라서 500의 대기는 1초와 2초 두 번만 발생한다.
+
+시도 횟수를 늘리면 성공률은 소폭 오르지만 사용자 대기 시간이 그만큼 길어진다.
+외부 API의 `retryAfter`가 30초로 오는 경우가 있어 503이 두 번 걸리면 이미 60초를 대기하게 된다.
+폴링 구조상 한 번의 요청에서 반드시 성공할 필요가 없으므로,
+**짧게 끊고 다음 폴링에 맡긴다.**
 
 ### 타임아웃
 
@@ -213,7 +266,7 @@ try:
     return await client.create(req)
 except httpx.TimeoutException:
     await asyncio.sleep(2)
-    existing = await client.list_by_employee(req.employee_id)
+    existing = await client.list_by_employee(req.employee_no)
     recent = find_recent(existing, within_seconds=30)
     if recent:
         return recent          # 방금 생성된 것이 있으면 재사용
@@ -247,11 +300,11 @@ except httpx.TimeoutException:
 ```python
 existing = await db.scalar(
     select(BackgroundCheck).where(
-        BackgroundCheck.employee_id == employee_id,
-        BackgroundCheck.status == "pending",
+        BackgroundCheck.employee_id == target.id,
+        BackgroundCheck.status == CheckStatus.PENDING,
     )
 )
-if existing:
+if existing is not None:
     raise HTTPException(409, "이미 진행 중인 조회가 있습니다")
 ```
 
@@ -284,21 +337,50 @@ DB 제약이나 선점 패턴이 필요하다.
 
 ### 해결: 클라이언트 추상화
 
+서비스 계층이 구체 타입에 의존하지 않도록 Protocol을 둔다.
+
 ```python
 class BackgroundCheckClient(Protocol):
-    async def create(self, req: CheckRequest) -> CheckResponse: ...
+    async def create(self, req: CheckRequest) -> CheckCreated: ...
     async def get(self, check_id: str) -> CheckResult: ...
-    async def list_by_employee(self, employee_id: str) -> list[CheckSummary]: ...
+    async def list_by_employee(self, employee_no: str) -> list[CheckSummary]: ...
+    async def aclose(self) -> None: ...
 ```
 
-구현체 둘을 두고 환경변수로 전환한다.
+### 가짜 클라이언트를 별도 구현체로 만들지 않는다
+
+Protocol이 있으면 두 번째 구현체를 만들고 싶어진다. 그렇게 하지 않는다.
+`HttpClient`를 그대로 쓰고 `httpx.MockTransport`로 **전송 계층만 교체**한다.
 
 ```python
-def get_check_client() -> BackgroundCheckClient:
+def build_fake_client(mode: str) -> HttpClient:
+    backend = _FakeBackend(mode)          # 모드별 응답을 만든다
+    transport = httpx.MockTransport(backend)
+    return HttpClient(httpx.AsyncClient(transport=transport, base_url="..."))
+
+
+def build_client() -> BackgroundCheckClient:
     if settings.USE_FAKE_API:
-        return FakeClient(mode=settings.FAKE_MODE)
-    return HttpClient(settings.BACKGROUND_CHECK_API_URL)
+        return build_fake_client(settings.FAKE_MODE)
+    return HttpClient(
+        httpx.AsyncClient(
+            base_url=settings.BACKGROUND_CHECK_API_URL,
+            timeout=settings.EXTERNAL_TIMEOUT_SECONDS,
+        )
+    )
 ```
+
+**근거가 이 절의 목적과 직결된다.**
+
+재시도·백오프 로직은 `HttpClient` 안에 있다. 가짜 클라이언트가 독립 구현체라면
+가짜를 쓰는 순간 그 로직이 실행되지 않는다.
+**즉 검증하려던 코드가 정작 검증 중에 실행되지 않는다.**
+
+재시도를 가짜 쪽에도 복제하면 로직이 두 벌이 되어,
+"검증한 코드"와 "실제로 실행되는 코드"가 갈라진다. 더 나쁜 결과다.
+
+transport만 교체하면 실패 시나리오 검증이 실제 호출과 **동일한 코드 경로**를 지난다.
+`BackgroundCheckClient` Protocol도 그대로 만족하므로 서비스 계층은 차이를 모른다.
 
 ```bash
 USE_FAKE_API=true FAKE_MODE=always_503 uv run uvicorn app.main:app
@@ -325,6 +407,11 @@ USE_FAKE_API=true FAKE_MODE=always_503 uv run uvicorn app.main:app
 | `timeout` | 응답 지연으로 타임아웃 유발 |
 | `always_pending` | 영원히 pending 유지 |
 | `fail_then_succeed` | 2회 실패 후 성공 (재시도 복구 경로 확인) |
+| `always_400` | 항상 400 (재시도하지 않는지 확인) |
+| `always_404` | 항상 404 (재시도하지 않는지 확인) |
+
+`always_400`과 `always_404`가 필요한 이유는 아래 검증 항목의 마지막 줄 때문이다.
+"재시도하지 않는 것"은 재현할 방법이 없으면 확인할 수 없다.
 
 ### 검증 항목
 
@@ -371,8 +458,8 @@ USE_FAKE_API=true FAKE_MODE=always_503 uv run uvicorn app.main:app
 | 항목 | 값 |
 |---|---|
 | HTTP 타임아웃 | 10초 |
-| 재시도 횟수 | 3회 |
-| 500 백오프 | 1s → 2s → 4s |
+| 재시도 | 총 3회 시도 (재시도 2회) |
+| 500 백오프 | 1s → 2s |
 | 503 대기 | 응답의 `retryAfter` |
 | 폴링 간격 | 3초 |
 | 폴링 최대 횟수 | 10회 |

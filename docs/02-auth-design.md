@@ -156,6 +156,23 @@ DB를 세션 저장소로 선택한 부수적 이점이다.)
 매 요청 확인은 이 구성에서 "없으면 뚫리는" 장치가 아니라 방어적 장치다.
 다만 어차피 `req.user`를 채우기 위해 employees를 조회해야 하므로 추가 비용이 사실상 0이다.
 
+### 퇴사자가 보는 메시지는 경로에 따라 다르다
+
+응답 코드 표는 퇴사자에게 "퇴사 처리된 계정입니다"가 나가는 것으로 되어 있으나,
+실제로는 두 갈래다.
+
+| 경로 | 메시지 |
+|---|---|
+| 퇴사 처리 직후 첫 요청 | 세션이 만료되었습니다 |
+| 퇴사자가 재로그인 시도 | 퇴사 처리된 계정입니다 |
+
+퇴사 처리가 세션을 **이미 삭제했으므로**, 다음 요청은 "퇴사자 발견" 분기가 아니라
+"세션 없음" 분기에 걸린다. 둘 다 401이고 프론트 처리도 동일하다.
+
+정확한 메시지를 주려면 세션을 남겨두거나 별도 표식이 필요한데,
+그것은 "퇴사 시 세션 삭제"라는 설계와 정면으로 어긋난다.
+사용자는 재로그인 시점에 이유를 알게 되므로 실질적인 문제가 없다.
+
 ---
 
 ## 퇴사 처리는 삭제가 아니다
@@ -267,7 +284,7 @@ PATCH  /api/employees/{employee_id}                      관리자
 POST   /api/employees/{employee_id}/resign               관리자
 POST   /api/employees/{employee_id}/background-checks    관리자
 GET    /api/employees/{employee_id}/background-checks    관리자
-GET    /api/background-checks/{check_id}                 관리자
+GET    /api/background-checks/{background_check_id}      관리자
 ```
 
 라우터 시그니처의 `Depends`만 보아도 접근 권한이 드러나는 것이 이 방식의 장점이다.
@@ -275,6 +292,10 @@ GET    /api/background-checks/{check_id}                 관리자
 **경로 파라미터 이름은 `{id}`가 아니라 `{employee_id}`로 쓴다.**
 `require_self_or_admin`이 경로 파라미터를 이름으로 주입받기 때문이다.
 `{id}`로 선언하면 FastAPI가 `employee_id`를 쿼리 파라미터로 요구해 422가 발생한다.
+
+신원조회 상세의 `{background_check_id}`는 **우리 DB의 내부 PK**다.
+외부 API가 발급한 `checkId`는 URL에 노출하지 않고 응답 본문에만 담는다.
+이름을 `{check_id}`로 두면 둘 중 무엇인지 읽는 사람이 오해한다.
 
 ---
 

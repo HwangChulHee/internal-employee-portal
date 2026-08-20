@@ -61,7 +61,7 @@
 - 사내 `employeeId`와 외부 `checkId`를 연결하는 기록이 필요하다
 
 **외부 API가 진실의 원천이고, 우리 DB는 사본이다.** 이 관계를 전제로 설계한다.
-로컬 상태가 `pending`인 경우 상세 조회 시점에 외부에 재확인하여 동기화한다.
+로컬 상태가 `pending`이거나 세부 결과가 아직 없는 경우, 상세 조회 시점에 외부에 재확인하여 동기화한다.
 
 ---
 
@@ -79,6 +79,11 @@ backend/app/
 ├── core/            인증·인가 의존성, 보안 유틸
 ├── services/        비즈니스 로직
 └── external/        외부 API 클라이언트, 이름 변환
+    ├── base.py          Protocol, 요청·응답 타입, 도메인 예외
+    ├── http_client.py   HTTP 구현체 (재시도 정책 포함)
+    ├── fake_client.py   MockTransport로 실패를 재현
+    ├── name_mapper.py   한글 성명 분리 (순수 함수)
+    └── deps.py          클라이언트 주입
 ```
 
 ### 설계 의도

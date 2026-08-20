@@ -87,7 +87,12 @@ DB는 Docker 네트워크 내부 통신으로 충분하다. 외부에 노출할 
 | `COOKIE_SECURE` | `false` | `true` |
 | `BACKGROUND_CHECK_API_URL` | 실제 URL | 실제 URL |
 | `USE_FAKE_API` | 필요 시 `true` | `false` |
+| `FAKE_MODE` | 재현할 실패 모드 | `normal` |
 | `CORS_ORIGINS` | localhost:5173 | 배포 도메인 |
+
+재시도 관련 값(`EXTERNAL_TIMEOUT_SECONDS`, `EXTERNAL_MAX_RETRIES`,
+`EXTERNAL_BACKOFF_BASE_SECONDS`, `EXTERNAL_DEFAULT_RETRY_AFTER`)은
+코드에 기본값이 있어 환경별로 다르게 줄 필요가 없다. 조정이 필요할 때만 재정의한다.
 
 **`COOKIE_SECURE`가 분리된 이유**: 로컬은 HTTP이므로 `secure=True`를 켜면
 브라우저가 쿠키를 전송하지 않아 로그인이 동작하지 않는다.
