@@ -6,11 +6,9 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app import models  # noqa: F401  autogenerate가 테이블을 인식하려면 필요하다
 from app.config import settings
 from app.database import Base
-
-# 모델이 추가되면 여기서 import 해야 autogenerate가 인식한다.
-# 예: from app import models
 
 config = context.config
 

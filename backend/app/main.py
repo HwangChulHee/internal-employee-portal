@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import auth, me
 from app.config import settings
 from app.database import get_db
 
@@ -25,3 +26,7 @@ app.add_middleware(
 async def health(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, str]:
     await db.execute(text("SELECT 1"))
     return {"status": "ok", "database": "connected"}
+
+
+app.include_router(auth.router)
+app.include_router(me.router)
