@@ -1,5 +1,7 @@
 from app.schemas.auth import LoginRequest, MessageResponse
 from app.schemas.employee import (
+    EmployeeAdminUpdate,
+    EmployeeCreate,
     EmployeeDetail,
     EmployeeListItem,
     MeResponse,
@@ -7,6 +9,8 @@ from app.schemas.employee import (
 )
 
 __all__ = [
+    "EmployeeAdminUpdate",
+    "EmployeeCreate",
     "EmployeeDetail",
     "EmployeeListItem",
     "LoginRequest",

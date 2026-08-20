@@ -2,6 +2,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models import EmployeeStatus, Role
+
 
 class MeResponse(BaseModel):
     """본인 정보 응답. password_hash는 여기에 정의하지 않으므로 절대 실려 나가지 않는다."""
@@ -17,8 +19,8 @@ class MeResponse(BaseModel):
     address: str | None
     department: str | None
     position: str | None
-    role: str
-    status: str
+    role: Role
+    status: EmployeeStatus
 
 
 class MeUpdate(BaseModel):
@@ -33,6 +35,41 @@ class MeUpdate(BaseModel):
     address: str | None = Field(default=None, max_length=200)
 
 
+class EmployeeCreate(BaseModel):
+    """직원 생성 요청.
+
+    비밀번호 필드를 받지 않는다. 초기 비밀번호는 login_id와 동일하게 자동 설정한다.
+    status도 정의하지 않는다. 생성 시점의 상태는 항상 ACTIVE다.
+    """
+
+    employee_no: str = Field(min_length=1, max_length=20)
+    login_id: str = Field(min_length=1, max_length=50)
+    name: str = Field(min_length=1, max_length=50)
+    date_of_birth: date
+    phone: str | None = Field(default=None, max_length=20)
+    address: str | None = Field(default=None, max_length=200)
+    department: str | None = Field(default=None, max_length=50)
+    position: str | None = Field(default=None, max_length=50)
+    role: Role = Role.EMPLOYEE
+
+
+class EmployeeAdminUpdate(BaseModel):
+    """관리자용 수정 요청.
+
+    status를 넣지 않는다. 퇴사 처리는 세션 삭제가 함께 일어나야 하는 행위라
+    별도 엔드포인트로 분리했고, 일반 필드 수정과 섞이면 안 된다.
+    employee_no와 login_id도 넣지 않는다. 식별자 변경은 이 과제의 범위 밖이다.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    date_of_birth: date | None = None
+    phone: str | None = Field(default=None, max_length=20)
+    address: str | None = Field(default=None, max_length=200)
+    department: str | None = Field(default=None, max_length=50)
+    position: str | None = Field(default=None, max_length=50)
+    role: Role | None = None
+
+
 class EmployeeListItem(BaseModel):
     """목록용. 생년월일 등 민감한 필드를 싣지 않는다."""
 
@@ -43,7 +80,7 @@ class EmployeeListItem(BaseModel):
     name: str
     department: str | None
     position: str | None
-    status: str
+    status: EmployeeStatus
 
 
 class EmployeeDetail(BaseModel):
@@ -60,5 +97,5 @@ class EmployeeDetail(BaseModel):
     address: str | None
     department: str | None
     position: str | None
-    role: str
-    status: str
+    role: Role
+    status: EmployeeStatus

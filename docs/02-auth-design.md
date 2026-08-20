@@ -194,7 +194,7 @@ async def require_admin(emp: Annotated[Employee, Depends(get_current_employee)])
 
 ### 2. 소유권 기반
 
-`GET /api/employees/{id}`에 "로그인했는가"만 검사하면 직원이 타인의 id로 조회할 수 있다.
+`GET /api/employees/{employee_id}`에 "로그인했는가"만 검사하면 직원이 타인의 id로 조회할 수 있다.
 **본인이거나 관리자**여야 한다.
 
 ```python
@@ -256,21 +256,25 @@ FastAPI의 `response_model`이 자동으로 필터링한다.
 ## 라우팅과 권한 매핑
 
 ```python
-POST   /api/auth/login                          공개
-POST   /api/auth/logout                         인증
-GET    /api/me                                  인증
-PATCH  /api/me                                  인증 (제한된 필드만)
-GET    /api/employees                           관리자
-POST   /api/employees                           관리자
-GET    /api/employees/{id}                      본인 또는 관리자
-PATCH  /api/employees/{id}                      관리자
-POST   /api/employees/{id}/resign               관리자
-POST   /api/employees/{id}/background-checks    관리자
-GET    /api/employees/{id}/background-checks    관리자
-GET    /api/background-checks/{id}              관리자
+POST   /api/auth/login                                   공개
+POST   /api/auth/logout                                  인증
+GET    /api/me                                           인증
+PATCH  /api/me                                           인증 (제한된 필드만)
+GET    /api/employees                                    관리자
+POST   /api/employees                                    관리자
+GET    /api/employees/{employee_id}                      본인 또는 관리자
+PATCH  /api/employees/{employee_id}                      관리자
+POST   /api/employees/{employee_id}/resign               관리자
+POST   /api/employees/{employee_id}/background-checks    관리자
+GET    /api/employees/{employee_id}/background-checks    관리자
+GET    /api/background-checks/{check_id}                 관리자
 ```
 
 라우터 시그니처의 `Depends`만 보아도 접근 권한이 드러나는 것이 이 방식의 장점이다.
+
+**경로 파라미터 이름은 `{id}`가 아니라 `{employee_id}`로 쓴다.**
+`require_self_or_admin`이 경로 파라미터를 이름으로 주입받기 때문이다.
+`{id}`로 선언하면 FastAPI가 `employee_id`를 쿼리 파라미터로 요구해 422가 발생한다.
 
 ---
 
