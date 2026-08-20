@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     BACKGROUND_CHECK_API_URL: str
     USE_FAKE_API: bool = False
     FAKE_MODE: str = "normal"
+
+    # 외부 API 연동 설정. 코드에 흩지 않고 여기에 모은다.
+    EXTERNAL_TIMEOUT_SECONDS: float = 10.0
+    EXTERNAL_MAX_RETRIES: int = 3
+    EXTERNAL_BACKOFF_BASE_SECONDS: float = 1.0
+    EXTERNAL_DEFAULT_RETRY_AFTER: int = 5
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
 
 
