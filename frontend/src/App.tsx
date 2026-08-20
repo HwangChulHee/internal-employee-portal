@@ -1,34 +1,70 @@
-import { useEffect, useState } from 'react'
-import './App.css'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
-type Health = {
-  status: string
-  database: string
+import { AuthProvider } from './auth/AuthProvider'
+import { Layout } from './components/Layout'
+import { RequireAdmin, RequireAuth } from './components/Guards'
+import { useAuth } from './hooks/useAuth'
+import { EmployeeDetailPage } from './pages/EmployeeDetailPage'
+import { EmployeeListPage } from './pages/EmployeeListPage'
+import { EmployeeNewPage } from './pages/EmployeeNewPage'
+import { LoginPage } from './pages/LoginPage'
+import { MePage } from './pages/MePage'
+import { FullPageSpinner } from './components/Spinner'
+import { landingPathFor } from './routes'
+
+/** 루트는 역할에 따라 갈린다. */
+function LandingRedirect() {
+  const { user, loading } = useAuth()
+  if (loading) return <FullPageSpinner />
+  if (!user) return <Navigate to="/login" replace />
+  return <Navigate to={landingPathFor(user.role)} replace />
 }
 
-function App() {
-  const [health, setHealth] = useState<Health | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json()
-      })
-      .then(setHealth)
-      .catch((err: Error) => setError(err.message))
-  }, [])
-
+export default function App() {
   return (
-    <main>
-      <h1>Internal Employee Portal</h1>
-      <h2>Health check</h2>
-      {error && <p>error: {error}</p>}
-      {!error && !health && <p>checking...</p>}
-      {health && <pre>{JSON.stringify(health, null, 2)}</pre>}
-    </main>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+
+          <Route
+            element={
+              <RequireAuth>
+                <Layout />
+              </RequireAuth>
+            }
+          >
+            <Route path="/" element={<LandingRedirect />} />
+            <Route path="/me" element={<MePage />} />
+            <Route
+              path="/admin/employees"
+              element={
+                <RequireAdmin>
+                  <EmployeeListPage />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/employees/new"
+              element={
+                <RequireAdmin>
+                  <EmployeeNewPage />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/employees/:employeeId"
+              element={
+                <RequireAdmin>
+                  <EmployeeDetailPage />
+                </RequireAdmin>
+              }
+            />
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   )
 }
-
-export default App
