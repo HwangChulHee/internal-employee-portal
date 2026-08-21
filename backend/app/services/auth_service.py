@@ -65,3 +65,15 @@ async def login(db: AsyncSession, login_id: str, password: str) -> SessionModel:
 async def logout(db: AsyncSession, session_id: str) -> None:
     await db.execute(delete(SessionModel).where(SessionModel.id == session_id))
     await db.commit()
+
+
+async def delete_all_sessions(db: AsyncSession, employee_id: int) -> None:
+    """해당 직원이 가진 모든 세션을 끊는다. 커밋하지 않는다.
+
+    퇴사 처리, 비밀번호 변경, 비밀번호 초기화 세 곳에서 쓴다.
+    셋 다 employees 변경과 같은 트랜잭션으로 묶여야 "상태는 바뀌었는데 세션은
+    살아있는" 어긋난 상태가 생기지 않으므로, 커밋은 호출자에게 맡긴다.
+    """
+    await db.execute(
+        delete(SessionModel).where(SessionModel.employee_id == employee_id)
+    )

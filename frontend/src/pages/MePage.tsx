@@ -5,6 +5,7 @@ import { ApiError } from '../api/client'
 import { EmployeeStatusBadge, RoleBadge } from '../components/Badge'
 import { ErrorMessage, InfoMessage } from '../components/ErrorMessage'
 import { ReadOnlyField, TextField } from '../components/Field'
+import { PasswordChangeSection } from '../components/PasswordChangeSection'
 import { useAuth } from '../hooks/useAuth'
 
 export function MePage() {
@@ -99,6 +100,8 @@ export function MePage() {
           </button>
         </form>
       </section>
+
+      <PasswordChangeSection />
     </div>
   )
 }

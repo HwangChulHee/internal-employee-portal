@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { ApiError, fieldErrors } from '../api/client'
 import * as employeesApi from '../api/employees'
@@ -11,6 +11,10 @@ import { ErrorMessage, InfoMessage } from '../components/ErrorMessage'
 import { ReadOnlyField, SelectField, TextField } from '../components/Field'
 import { Spinner } from '../components/Spinner'
 import { useAuth } from '../hooks/useAuth'
+
+// 관리자가 자기 자신을 초기화하면 자기 세션도 끊긴다.
+// 안내를 읽을 시간을 준 뒤 로그인 화면으로 보낸다.
+const SELF_RESET_REDIRECT_MS = 2500
 
 interface FormState {
   name: string
@@ -37,7 +41,8 @@ function toForm(e: EmployeeDetail): FormState {
 export function EmployeeDetailPage() {
   const { employeeId } = useParams<{ employeeId: string }>()
   const location = useLocation()
-  const { user } = useAuth()
+  const navigate = useNavigate()
+  const { user, clearSession } = useAuth()
 
   const id = Number(employeeId)
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null)
@@ -51,6 +56,9 @@ export function EmployeeDetailPage() {
   const [saving, setSaving] = useState(false)
   const [confirmResign, setConfirmResign] = useState(false)
   const [resigning, setResigning] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [selfResetNotice, setSelfResetNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoadError(null)
@@ -71,6 +79,17 @@ export function EmployeeDetailPage() {
     if (Number.isNaN(id)) return
     void load()
   }, [id, load])
+
+  useEffect(() => {
+    if (selfResetNotice === null) return
+    const timer = window.setTimeout(() => {
+      // 내 세션이 이미 서버에서 지워졌다. 인증 상태를 비우지 않으면
+      // 로그인 화면이 "이미 로그인됨"으로 보고 되돌려 보낸다.
+      clearSession(selfResetNotice)
+      navigate('/login', { replace: true })
+    }, SELF_RESET_REDIRECT_MS)
+    return () => window.clearTimeout(timer)
+  }, [selfResetNotice, navigate, clearSession])
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => (prev === null ? prev : { ...prev, [key]: value }))
@@ -129,6 +148,26 @@ export function EmployeeDetailPage() {
     }
   }
 
+  async function handleResetPassword() {
+    setResetting(true)
+    setSaveError(null)
+    try {
+      const res = await employeesApi.resetPassword(id)
+      setConfirmReset(false)
+      setNotice(res.message)
+      // 대상이 나 자신이면 방금 내 세션도 사라졌다. 이 화면에 머물면
+      // 다음 동작이 전부 401이 되므로 안내 후 로그인 화면으로 보낸다.
+      if (user?.id === id) setSelfResetNotice(res.message)
+    } catch (err) {
+      setSaveError(
+        err instanceof ApiError ? err.displayMessage : '초기화하지 못했습니다',
+      )
+      setConfirmReset(false)
+    } finally {
+      setResetting(false)
+    }
+  }
+
   // 잘못된 주소는 상태로 들고 있을 필요가 없다. 렌더 시점에 판정한다.
   const message = Number.isNaN(id) ? '잘못된 주소입니다' : loadError
 
@@ -165,17 +204,27 @@ export function EmployeeDetailPage() {
       <section className="rounded-lg bg-white p-5 ring-1 ring-slate-200">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="text-sm font-semibold text-slate-900">기본 정보</h2>
-          {/* 본인이면 백엔드가 400을 반환하므로 버튼 자체를 숨긴다.
-              이미 퇴사한 직원도 마찬가지로 숨긴다. */}
-          {!isSelf && !alreadyResigned && (
+          <div className="flex flex-wrap gap-2">
+            {/* 초기화는 퇴사자와 본인에게도 허용된다. 조건 없이 보여준다. */}
             <button
               type="button"
-              onClick={() => setConfirmResign(true)}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-50"
+              onClick={() => setConfirmReset(true)}
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
             >
-              퇴사 처리
+              비밀번호 초기화
             </button>
-          )}
+            {/* 본인이면 백엔드가 400을 반환하므로 버튼 자체를 숨긴다.
+                이미 퇴사한 직원도 마찬가지로 숨긴다. */}
+            {!isSelf && !alreadyResigned && (
+              <button
+                type="button"
+                onClick={() => setConfirmResign(true)}
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-50"
+              >
+                퇴사 처리
+              </button>
+            )}
+          </div>
         </div>
 
         <dl className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -271,6 +320,28 @@ export function EmployeeDetailPage() {
       </section>
 
       <BackgroundCheckSection employee={employee} />
+
+      <ConfirmDialog
+        open={confirmReset}
+        title="비밀번호를 초기화하시겠습니까?"
+        destructive
+        busy={resetting}
+        confirmLabel="초기화"
+        onCancel={() => setConfirmReset(false)}
+        onConfirm={() => void handleResetPassword()}
+      >
+        <p>
+          <strong>{employee.name}</strong> 님의 비밀번호를 초기값으로 되돌리고,
+          로그인된 모든 세션을 종료합니다.
+        </p>
+        <p className="mt-2">되돌릴 수 없습니다.</p>
+        {isSelf && (
+          <p className="mt-2 font-medium text-rose-700">
+            본인 계정입니다. 초기화하면 지금 이 세션도 종료되어 다시 로그인해야
+            합니다.
+          </p>
+        )}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={confirmResign}

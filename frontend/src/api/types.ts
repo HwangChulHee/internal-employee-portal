@@ -21,6 +21,26 @@ export interface MeResponse {
   status: EmployeeStatus
 }
 
+/** 단순 성공 응답. 로그인·로그아웃·비밀번호 변경이 이 형태다. */
+export interface MessageResponse {
+  message: string
+}
+
+/**
+ * GET /api/auth/password-policy — 인증 필요.
+ * 초기 비밀번호와 최소 길이를 프론트에 적어두지 않고 서버에서 받는다.
+ */
+export interface PasswordPolicy {
+  initial_password: string
+  min_length: number
+}
+
+/** PATCH /api/me/password — 현재 비밀번호를 함께 보낸다. */
+export interface PasswordChange {
+  current_password: string
+  new_password: string
+}
+
 /** PATCH /api/me — 본인이 수정할 수 있는 필드는 이 둘뿐이다. */
 export interface MeUpdate {
   phone?: string | null
@@ -50,7 +70,7 @@ export interface EmployeeDetail {
   status: EmployeeStatus
 }
 
-/** POST /api/employees — 비밀번호 필드가 없다. 초기 비밀번호는 login_id와 동일하다. */
+/** POST /api/employees — 비밀번호 필드가 없다. 초기 비밀번호는 서버가 정한다. */
 export interface EmployeeCreate {
   employee_no: string
   login_id: string
@@ -72,6 +92,14 @@ export interface EmployeeAdminUpdate {
   department?: string | null
   position?: string | null
   role?: Role
+}
+
+/**
+ * POST /api/employees 응답. EmployeeDetail에 초기 비밀번호가 더해진다.
+ * 조회·수정 응답에는 이 필드가 없다. 발급 직후에만 사실인 값이기 때문이다.
+ */
+export interface EmployeeCreated extends EmployeeDetail {
+  initial_password: string
 }
 
 export interface BackgroundCheckListItem {

@@ -3,14 +3,15 @@ import { Navigate } from 'react-router-dom'
 
 import * as authApi from '../api/auth'
 import { ApiError } from '../api/client'
-import { ErrorMessage } from '../components/ErrorMessage'
+import { ErrorMessage, InfoMessage } from '../components/ErrorMessage'
 import { FullPageSpinner } from '../components/Spinner'
 import { TextField } from '../components/Field'
 import { useAuth } from '../hooks/useAuth'
 import { landingPathFor } from '../routes'
 
 export function LoginPage() {
-  const { user, loading, refresh } = useAuth()
+  // 비밀번호 변경처럼 세션이 끊긴 이유가 있으면 컨텍스트에 담겨 온다.
+  const { user, loading, refresh, sessionNotice } = useAuth()
   const [loginId, setLoginId] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +48,11 @@ export function LoginPage() {
         <h1 className="text-center text-lg font-semibold text-slate-900">
           사내 직원 포털
         </h1>
+        {sessionNotice && (
+          <div className="mt-4">
+            <InfoMessage message={sessionNotice} />
+          </div>
+        )}
         <form
           onSubmit={(e) => void handleSubmit(e)}
           className="mt-6 space-y-4 rounded-lg bg-white p-6 shadow-sm ring-1 ring-slate-200"
@@ -58,6 +64,7 @@ export function LoginPage() {
             onChange={setLoginId}
             required
             disabled={submitting}
+            autoComplete="username"
           />
           <TextField
             label="비밀번호"
@@ -67,6 +74,7 @@ export function LoginPage() {
             onChange={setPassword}
             required
             disabled={submitting}
+            autoComplete="current-password"
           />
           <ErrorMessage message={error} />
           <button

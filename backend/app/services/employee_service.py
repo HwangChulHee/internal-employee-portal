@@ -6,14 +6,18 @@
 
 from fastapi import HTTPException
 from fastapi import status as http_status
-from sqlalchemy import delete, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password_async
+from app.core.security import (
+    INITIAL_PASSWORD,
+    hash_password_async,
+    verify_password_async,
+)
 from app.models import Employee, EmployeeStatus, Role
-from app.models import Session as SessionModel
 from app.schemas.employee import EmployeeAdminUpdate, EmployeeCreate, MeUpdate
+from app.services import auth_service
 
 # 유니크 제약 이름 → 사용자에게 보여줄 메시지.
 # employee_no는 UNIQUE 제약, login_id는 유니크 인덱스라 이름 형식이 다르다.
@@ -90,7 +94,7 @@ async def get_employee(db: AsyncSession, employee_id: int) -> Employee:
 
 
 async def create_employee(db: AsyncSession, payload: EmployeeCreate) -> Employee:
-    """직원 계정 생성. 초기 비밀번호는 login_id와 동일하다."""
+    """직원 계정 생성. 초기 비밀번호는 INITIAL_PASSWORD 고정값이다."""
     # 사전 조회로 흔한 경우를 걸러 어느 필드가 중복인지 정확히 알려준다.
     existing = await db.scalar(
         select(Employee).where(
@@ -121,7 +125,7 @@ async def create_employee(db: AsyncSession, payload: EmployeeCreate) -> Employee
         role=payload.role,
         # 생성 시점의 상태는 항상 ACTIVE다. 요청으로 지정할 수 없다.
         status=EmployeeStatus.ACTIVE,
-        password_hash=await hash_password_async(payload.login_id),
+        password_hash=await hash_password_async(INITIAL_PASSWORD),
     )
     db.add(employee)
 
@@ -187,10 +191,55 @@ async def resign_employee(db: AsyncSession, target: Employee) -> Employee:
     필요해지면 되돌릴 수 있다.
     """
     target.status = EmployeeStatus.RESIGNED
-    await db.execute(delete(SessionModel).where(SessionModel.employee_id == target.id))
+    await auth_service.delete_all_sessions(db, target.id)
     await db.commit()
     await db.refresh(target)
     return target
+
+
+async def change_password(
+    db: AsyncSession, employee: Employee, current: str, new: str
+) -> None:
+    """직원 본인의 비밀번호 변경.
+
+    현재 비밀번호를 요구한다. 세션만으로 변경을 허용하면 자리를 비운 사이
+    타인이 비밀번호를 바꿔 계정을 가져갈 수 있다. 세션 보유는 "지금 이 브라우저를
+    쓰고 있다"는 증거일 뿐 본인 확인이 아니다.
+
+    검증 순서를 바꾸지 않는다. 현재 비밀번호를 먼저 확인해야,
+    비밀번호를 모르는 사람이 "새 값이 현재 값과 같은지" 응답으로 알아낼 수 없다.
+    """
+    if not await verify_password_async(current, employee.password_hash):
+        raise HTTPException(
+            http_status.HTTP_400_BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다"
+        )
+
+    if current == new:
+        raise HTTPException(
+            http_status.HTTP_400_BAD_REQUEST,
+            "새 비밀번호가 현재 비밀번호와 같습니다",
+        )
+
+    employee.password_hash = await hash_password_async(new)
+    # 본인 세션까지 모두 지운다. 비밀번호 변경은 대개 "유출된 것 같다"는 상황에서
+    # 일어나므로, 다른 기기의 세션이 살아 있으면 변경한 의미가 없다.
+    await auth_service.delete_all_sessions(db, employee.id)
+    await db.commit()
+
+
+async def reset_password(db: AsyncSession, target: Employee) -> None:
+    """관리자의 비밀번호 초기화.
+
+    퇴사자에게도 허용한다. 로그인 자체가 막혀 있어 무해하고,
+    복직 시나리오를 굳이 배제할 이유가 없다.
+    관리자가 자기 자신을 초기화하는 것도 막지 않는다. 막을 근거가 없다.
+
+    세션을 지우지 않으면 초기화된 직원이 기존 세션으로 계속 접근할 수 있어
+    초기화의 의미가 반감된다.
+    """
+    target.password_hash = await hash_password_async(INITIAL_PASSWORD)
+    await auth_service.delete_all_sessions(db, target.id)
+    await db.commit()
 
 
 def ensure_not_self_demotion(

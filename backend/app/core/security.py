@@ -15,6 +15,17 @@ from fastapi.concurrency import run_in_threadpool
 # 이것이 없으면 응답 시간 차이로 계정 존재 여부가 드러난다.
 _DUMMY_HASH = "$2b$12$Ly6tI5iibxwvOLSnz9Z.6OO.eaPaKKFHN.0/x6V/6uLapcmvgWaRe"
 
+# 초기 비밀번호. 계정 생성, 관리자 초기화, 시드 세 곳에서 같은 값을 써야 하므로
+# 여기 한 곳에만 정의한다.
+#
+# 로그인 아이디와 같은 값을 쓰지 않는다. 아이디와 동일한 비밀번호는 브라우저가
+# 유출된 자격증명으로 판단해 경고를 띄우고, 아이디를 아는 사람이 곧 비밀번호를
+# 아는 것과 같아 무차별 대입에도 취약하다.
+INITIAL_PASSWORD = "bit1234"
+
+# 비밀번호 최소 길이. 스키마 검증과 화면 안내가 같은 값을 봐야 하므로 여기서 정한다.
+MIN_PASSWORD_LENGTH = 4
+
 
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()

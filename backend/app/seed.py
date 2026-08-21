@@ -2,8 +2,13 @@
 
     uv run python -m app.seed
 
-초기 비밀번호는 로그인 아이디와 동일하다(docs/05-data-model.md).
+초기 비밀번호는 INITIAL_PASSWORD 고정값이다(docs/05-data-model.md).
 login_id 존재 여부를 확인하므로 여러 번 실행해도 중복 생성되지 않는다.
+
+멱등성의 대가로, 이미 있는 계정의 비밀번호는 갱신하지 않는다.
+초기 비밀번호 정책을 바꾼 뒤 시드 계정에 반영하려면 DB를 비워야 한다.
+
+    docker compose down -v && docker compose up -d
 """
 
 import asyncio
@@ -11,7 +16,7 @@ from datetime import date
 
 from sqlalchemy import select
 
-from app.core.security import hash_password
+from app.core.security import INITIAL_PASSWORD, hash_password
 from app.database import AsyncSessionLocal
 from app.models import Employee, EmployeeStatus, Role
 
@@ -94,8 +99,7 @@ async def seed() -> None:
             db.add(
                 Employee(
                     **row,
-                    # 초기 비밀번호는 로그인 아이디와 동일하다.
-                    password_hash=hash_password(row["login_id"]),
+                    password_hash=hash_password(INITIAL_PASSWORD),
                 )
             )
             created += 1

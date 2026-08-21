@@ -6,6 +6,7 @@ import * as employeesApi from '../api/employees'
 import type { EmployeeCreate, Role } from '../api/types'
 import { ErrorMessage } from '../components/ErrorMessage'
 import { SelectField, TextField } from '../components/Field'
+import { usePasswordPolicy } from '../hooks/usePasswordPolicy'
 
 const EMPTY: EmployeeCreate = {
   employee_no: '',
@@ -21,6 +22,8 @@ const EMPTY: EmployeeCreate = {
 
 export function EmployeeNewPage() {
   const navigate = useNavigate()
+  // 초기 비밀번호를 화면에 적어두지 않는다. 백엔드가 실제로 설정하는 값을 받아 쓴다.
+  const policy = usePasswordPolicy()
   const [form, setForm] = useState<EmployeeCreate>(EMPTY)
   const [error, setError] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -45,7 +48,10 @@ export function EmployeeNewPage() {
       })
       navigate(`/admin/employees/${created.id}`, {
         state: {
-          notice: `계정이 생성되었습니다. 초기 비밀번호는 아이디(${created.login_id})와 동일합니다.`,
+          // 응답에 담겨 온 값을 그대로 쓴다. 서버가 실제로 설정한 비밀번호다.
+          notice:
+            `계정이 생성되었습니다. 아이디는 ${created.login_id}, ` +
+            `초기 비밀번호는 ${created.initial_password} 입니다.`,
         },
       })
     } catch (err) {
@@ -76,8 +82,13 @@ export function EmployeeNewPage() {
         className="space-y-5 rounded-lg bg-white p-5 ring-1 ring-slate-200"
       >
         <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 ring-1 ring-inset ring-sky-200">
-          비밀번호는 입력하지 않습니다. 초기 비밀번호는 로그인 아이디와 동일하게
-          자동 설정됩니다.
+          비밀번호는 입력하지 않습니다. 초기 비밀번호는{' '}
+          {policy === null ? (
+            '자동으로 설정됩니다'
+          ) : (
+            <strong className="font-semibold">{policy.initial_password}</strong>
+          )}
+          {policy === null ? '.' : ' 입니다.'} 직원이 로그인 후 직접 변경할 수 있습니다.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">

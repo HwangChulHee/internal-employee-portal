@@ -42,7 +42,7 @@ class Employee(Base):
     # 업무용 사번. 외부 Background Check API의 employeeId로 전달된다.
     employee_no: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
 
-    # 로그인 아이디. 초기 비밀번호는 이 값과 동일하게 발급한다.
+    # 로그인 아이디. 초기 비밀번호는 이 값과 무관한 고정 상수다(core/security.py).
     login_id: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # bcrypt 해시. 평문 저장 금지.

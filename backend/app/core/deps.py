@@ -12,11 +12,10 @@ from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cookies import SESSION_COOKIE_NAME
 from app.database import get_db
 from app.models import Employee, EmployeeStatus, Role
 from app.models import Session as SessionModel
-
-SESSION_COOKIE_NAME = "SESSIONID"
 
 
 async def get_current_employee(

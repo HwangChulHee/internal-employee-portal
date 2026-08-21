@@ -38,7 +38,7 @@ class MeUpdate(BaseModel):
 class EmployeeCreate(BaseModel):
     """직원 생성 요청.
 
-    비밀번호 필드를 받지 않는다. 초기 비밀번호는 login_id와 동일하게 자동 설정한다.
+    비밀번호 필드를 받지 않는다. 초기 비밀번호는 서버가 고정값으로 설정한다.
     status도 정의하지 않는다. 생성 시점의 상태는 항상 ACTIVE다.
     """
 
@@ -99,3 +99,14 @@ class EmployeeDetail(BaseModel):
     position: str | None
     role: Role
     status: EmployeeStatus
+
+
+class EmployeeCreated(EmployeeDetail):
+    """생성 응답에만 초기 비밀번호를 얹는다.
+
+    EmployeeDetail에 넣지 않는 이유: 조회·수정 응답에도 함께 실려 나가는데,
+    그 시점에는 이미 직원이 바꿨을 수 있어 사실이 아닌 값이 된다.
+    "방금 발급한 비밀번호"는 생성 순간에만 의미가 있다.
+    """
+
+    initial_password: str

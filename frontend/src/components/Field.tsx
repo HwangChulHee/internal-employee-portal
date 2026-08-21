@@ -32,6 +32,12 @@ interface TextFieldProps {
   placeholder?: string
   error?: string
   disabled?: boolean
+  /**
+   * 비밀번호 입력란에는 반드시 지정한다.
+   * 브라우저는 이 값으로 "로그인 중"과 "새 비밀번호 설정 중"을 구분한다.
+   * 없으면 새 비밀번호 입력을 로그인으로 오해해 엉뚱한 저장·경고를 띄운다.
+   */
+  autoComplete?: string
 }
 
 export function TextField({
@@ -44,6 +50,7 @@ export function TextField({
   placeholder,
   error,
   disabled = false,
+  autoComplete,
 }: TextFieldProps) {
   return (
     <div>
@@ -62,6 +69,7 @@ export function TextField({
         required={required}
         disabled={disabled}
         placeholder={placeholder}
+        autoComplete={autoComplete}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full rounded-md border-0 bg-white px-3 py-2 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-inset focus:ring-slate-600 disabled:bg-slate-100"
       />

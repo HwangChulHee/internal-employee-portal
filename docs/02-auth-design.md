@@ -156,6 +156,22 @@ DB를 세션 저장소로 선택한 부수적 이점이다.)
 매 요청 확인은 이 구성에서 "없으면 뚫리는" 장치가 아니라 방어적 장치다.
 다만 어차피 `req.user`를 채우기 위해 employees를 조회해야 하므로 추가 비용이 사실상 0이다.
 
+### 세션을 통째로 지우는 지점은 세 곳이다
+
+| 지점 | 이유 |
+|---|---|
+| 퇴사 처리 | 그 순간부터 접근을 끊어야 한다 |
+| 본인 비밀번호 변경 | 대개 "유출된 것 같다"는 상황이다. 다른 기기의 세션이 살아 있으면 변경의 의미가 없다 |
+| 관리자 비밀번호 초기화 | 기존 세션이 남으면 그 직원이 계속 접근할 수 있어 초기화가 반쯤 무의미해진다 |
+
+셋 다 같은 문장(`DELETE FROM sessions WHERE employee_id = ?`)이고 모두
+employees 변경과 한 트랜잭션에 묶여야 하므로,
+`auth_service.delete_all_sessions()` 하나로 두고 커밋은 호출자가 한다.
+
+비밀번호를 바꾼 본인도 함께 로그아웃된다.
+불편해 보이지만, 새 비밀번호로 다시 로그인하는 것이 자연스러운 흐름이고
+"내 다른 세션만 살려두는" 예외를 만들면 위 이유가 통째로 무너진다.
+
 ### 퇴사자가 보는 메시지는 경로에 따라 다르다
 
 응답 코드 표는 퇴사자에게 "퇴사 처리된 계정입니다"가 나가는 것으로 되어 있으나,
@@ -275,19 +291,27 @@ FastAPI의 `response_model`이 자동으로 필터링한다.
 ```python
 POST   /api/auth/login                                   공개
 POST   /api/auth/logout                                  인증
+GET    /api/auth/password-policy                         인증
 GET    /api/me                                           인증
 PATCH  /api/me                                           인증 (제한된 필드만)
+PATCH  /api/me/password                                  인증 (본인)
 GET    /api/employees                                    관리자
 POST   /api/employees                                    관리자
 GET    /api/employees/{employee_id}                      본인 또는 관리자
 PATCH  /api/employees/{employee_id}                      관리자
 POST   /api/employees/{employee_id}/resign               관리자
+POST   /api/employees/{employee_id}/password/reset       관리자
 POST   /api/employees/{employee_id}/background-checks    관리자
 GET    /api/employees/{employee_id}/background-checks    관리자
 GET    /api/background-checks/{background_check_id}      관리자
 ```
 
 라우터 시그니처의 `Depends`만 보아도 접근 권한이 드러나는 것이 이 방식의 장점이다.
+
+`GET /api/auth/password-policy`는 초기 비밀번호와 최소 길이를 화면에 알려준다.
+프론트에 같은 값을 적어두면 백엔드가 정책을 바꿨을 때 화면만 옛 값을 안내한다.
+공개하지 않고 인증을 요구하는 이유는, 초기 비밀번호를 누구나 볼 수 있으면
+신규 계정의 첫 비밀번호를 그대로 알려주는 셈이기 때문이다.
 
 **경로 파라미터 이름은 `{id}`가 아니라 `{employee_id}`로 쓴다.**
 `require_self_or_admin`이 경로 파라미터를 이름으로 주입받기 때문이다.
