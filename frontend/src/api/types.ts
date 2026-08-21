@@ -70,9 +70,11 @@ export interface EmployeeDetail {
   status: EmployeeStatus
 }
 
-/** POST /api/employees — 비밀번호 필드가 없다. 초기 비밀번호는 서버가 정한다. */
+/**
+ * POST /api/employees — 사번과 비밀번호 필드가 없다.
+ * 둘 다 서버가 발급한다. 보내더라도 백엔드 스키마가 무시한다.
+ */
 export interface EmployeeCreate {
-  employee_no: string
   login_id: string
   name: string
   date_of_birth: string

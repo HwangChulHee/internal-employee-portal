@@ -4,6 +4,9 @@
 테스트에서 이 함수들을 직접 호출할 수 있어야 하므로 요청 객체에 의존하지 않는다.
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import HTTPException
 from fastapi import status as http_status
 from sqlalchemy import or_, select
@@ -21,10 +24,23 @@ from app.services import auth_service
 
 # 유니크 제약 이름 → 사용자에게 보여줄 메시지.
 # employee_no는 UNIQUE 제약, login_id는 유니크 인덱스라 이름 형식이 다르다.
+#
+# 사번 위반은 사용자 잘못이 아니다. 서버가 발급하는 값이므로 입력 중복이 있을 수
+# 없고, 두 관리자가 동시에 등록해 같은 번호를 읽은 경우에만 발생한다.
+# "이미 사용 중인 사번입니다"라고 하면 사번을 입력한 적도 없는 관리자가 당황한다.
 _UNIQUE_VIOLATION_MESSAGES = {
-    "employees_employee_no_key": "이미 사용 중인 사번입니다",
+    "employees_employee_no_key": "사번 발급 중 충돌이 발생했습니다. 다시 시도해 주세요",
     "idx_employees_login_id": "이미 사용 중인 아이디입니다",
 }
+
+# 사번의 연도는 회사가 있는 지역의 날짜를 따른다.
+# UTC로 두면 1월 1일 오전에 한국에서 등록한 직원이 아직 UTC로는 12월 31일이라
+# 전년도 사번을 받는다. 서버의 로컬 시간(datetime.now())도 쓰지 않는다.
+# 컨테이너의 TZ 설정에 따라 결과가 달라지면 같은 코드가 환경마다 다르게 동작한다.
+_COMPANY_TZ = ZoneInfo("Asia/Seoul")
+
+# 일련번호의 최소 자릿수. 999를 넘으면 자연스럽게 네 자리가 된다.
+_SEQUENCE_MIN_DIGITS = 3
 
 
 async def update_me(
@@ -93,28 +109,58 @@ async def get_employee(db: AsyncSession, employee_id: int) -> Employee:
     return employee
 
 
+async def _next_employee_no(db: AsyncSession) -> str:
+    """다음 사번을 발급한다.
+
+    형식: EMP-{연도}-{3자리 일련번호}
+    연도가 바뀌면 001부터 다시 시작한다. 사번만 보고 입사 연도를 알 수 있다.
+    접두사가 연도마다 다르므로 지난 연도의 사번은 조회 대상에 들어오지 않는다.
+
+    가장 큰 값을 `ORDER BY employee_no DESC LIMIT 1`로 뽑지 않는다.
+    문자열 정렬이 숫자 정렬과 일치하는 것은 제로패딩 자릿수가 같을 때뿐이라,
+    999를 넘어 네 자리가 되는 순간 "EMP-2026-1000" < "EMP-2026-999"가 되어
+    코드가 조용히 틀린다. 올해분만 읽어 숫자로 비교하면 그 전제 자체가 필요 없고,
+    1000번째 사번은 그대로 EMP-2026-1000이 된다.
+    한 해 등록 건수는 많아야 수백 건이라 전부 읽어도 부담이 없다.
+    """
+    year = datetime.now(_COMPANY_TZ).year
+    prefix = f"EMP-{year}-"
+
+    rows = await db.scalars(
+        select(Employee.employee_no).where(Employee.employee_no.like(f"{prefix}%"))
+    )
+    # 접두사가 같아도 뒤가 숫자가 아닌 값은 채번 대상이 아니다.
+    # 과거에 수동으로 넣은 사번이 섞여 있어도 int() 변환에서 터지지 않는다.
+    used = [int(suffix) for no in rows if (suffix := no[len(prefix) :]).isdigit()]
+
+    return f"{prefix}{max(used, default=0) + 1:0{_SEQUENCE_MIN_DIGITS}d}"
+
+
 async def create_employee(db: AsyncSession, payload: EmployeeCreate) -> Employee:
-    """직원 계정 생성. 초기 비밀번호는 INITIAL_PASSWORD 고정값이다."""
-    # 사전 조회로 흔한 경우를 걸러 어느 필드가 중복인지 정확히 알려준다.
+    """직원 계정 생성.
+
+    사번은 서버가 발급하고 초기 비밀번호는 INITIAL_PASSWORD 고정값이다.
+    관리자가 입력하는 식별자는 login_id뿐이다.
+    """
+    # 사전 조회로 흔한 경우를 걸러 명확한 메시지를 준다.
+    # employee_no는 검사하지 않는다. 사용자 입력이 아니라 서버 발급이므로
+    # 입력 중복이 있을 수 없고, 채번 경쟁 조건은 아래 IntegrityError가 잡는다.
     existing = await db.scalar(
-        select(Employee).where(
-            or_(
-                Employee.employee_no == payload.employee_no,
-                Employee.login_id == payload.login_id,
-            )
-        )
+        select(Employee).where(Employee.login_id == payload.login_id)
     )
     if existing is not None:
-        if existing.employee_no == payload.employee_no:
-            raise HTTPException(
-                http_status.HTTP_409_CONFLICT, "이미 사용 중인 사번입니다"
-            )
         raise HTTPException(
             http_status.HTTP_409_CONFLICT, "이미 사용 중인 아이디입니다"
         )
 
+    # 해싱을 채번보다 먼저 한다. bcrypt는 호출당 약 180ms가 걸리는데, 채번을 먼저
+    # 하면 번호를 읽은 시점부터 커밋까지 그 시간만큼 창이 열려 동시 등록이 같은
+    # 번호를 집어갈 확률이 크게 올라간다. 순서만 바꿔도 창이 거의 사라진다.
+    # 재시도를 넣는 것과 달리 흐름이 복잡해지지 않는다.
+    password_hash = await hash_password_async(INITIAL_PASSWORD)
+
     employee = Employee(
-        employee_no=payload.employee_no,
+        employee_no=await _next_employee_no(db),
         login_id=payload.login_id,
         name=payload.name,
         date_of_birth=payload.date_of_birth,
@@ -125,15 +171,18 @@ async def create_employee(db: AsyncSession, payload: EmployeeCreate) -> Employee
         role=payload.role,
         # 생성 시점의 상태는 항상 ACTIVE다. 요청으로 지정할 수 없다.
         status=EmployeeStatus.ACTIVE,
-        password_hash=await hash_password_async(INITIAL_PASSWORD),
+        password_hash=password_hash,
     )
     db.add(employee)
 
     try:
         await db.commit()
     except IntegrityError as exc:
-        # 사전 조회와 INSERT 사이에는 경쟁 조건이 있다. DB 제약이 최종 방어선이므로
-        # 여기서 잡아 409로 변환한다. 사전 조회만으로 끝내면 동시 요청에서 500이 난다.
+        # 두 가지 경쟁 조건을 여기서 함께 잡는다.
+        # login_id는 사전 조회와 INSERT 사이에 다른 요청이 끼어든 경우,
+        # employee_no는 두 요청이 같은 번호를 읽어간 경우다.
+        # 재시도는 두지 않는다. 관리자 수가 적고 등록 빈도가 낮아 발생 확률이
+        # 극히 낮으며, 발생해도 다시 등록하면 해결된다.
         await db.rollback()
         raise HTTPException(
             http_status.HTTP_409_CONFLICT, _unique_violation_message(exc)

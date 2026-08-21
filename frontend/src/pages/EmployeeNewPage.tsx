@@ -9,7 +9,6 @@ import { SelectField, TextField } from '../components/Field'
 import { usePasswordPolicy } from '../hooks/usePasswordPolicy'
 
 const EMPTY: EmployeeCreate = {
-  employee_no: '',
   login_id: '',
   name: '',
   date_of_birth: '',
@@ -48,15 +47,17 @@ export function EmployeeNewPage() {
       })
       navigate(`/admin/employees/${created.id}`, {
         state: {
-          // 응답에 담겨 온 값을 그대로 쓴다. 서버가 실제로 설정한 비밀번호다.
+          // 응답에 담겨 온 값을 그대로 쓴다. 사번도 비밀번호도 서버가 정한 값이다.
           notice:
-            `계정이 생성되었습니다. 아이디는 ${created.login_id}, ` +
-            `초기 비밀번호는 ${created.initial_password} 입니다.`,
+            `계정이 생성되었습니다. (사번: ${created.employee_no})\n` +
+            `아이디는 ${created.login_id}, 초기 비밀번호는 ` +
+            `${created.initial_password} 입니다.`,
         },
       })
     } catch (err) {
       if (err instanceof ApiError) {
-        // 409는 사번/아이디 중복이며 백엔드가 어느 쪽인지 구분해 알려준다.
+        // 409는 아이디 중복이거나, 드물게 채번 경쟁 조건이다.
+        // 백엔드가 두 경우의 문구를 구분해 준다.
         setError(err.displayMessage)
         setErrors(fieldErrors(err))
       } else {
@@ -82,7 +83,8 @@ export function EmployeeNewPage() {
         className="space-y-5 rounded-lg bg-white p-5 ring-1 ring-slate-200"
       >
         <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 ring-1 ring-inset ring-sky-200">
-          비밀번호는 입력하지 않습니다. 초기 비밀번호는{' '}
+          사번은 등록 시 자동으로 발급됩니다. 비밀번호도 입력하지 않습니다.
+          초기 비밀번호는{' '}
           {policy === null ? (
             '자동으로 설정됩니다'
           ) : (
@@ -92,16 +94,6 @@ export function EmployeeNewPage() {
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <TextField
-            label="사번"
-            name="employee_no"
-            value={form.employee_no}
-            onChange={(v) => set('employee_no', v)}
-            placeholder="EMP-2024-010"
-            required
-            error={errors.employee_no}
-            disabled={submitting}
-          />
           <TextField
             label="로그인 아이디"
             name="login_id"

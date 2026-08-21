@@ -38,11 +38,16 @@ class MeUpdate(BaseModel):
 class EmployeeCreate(BaseModel):
     """직원 생성 요청.
 
-    비밀번호 필드를 받지 않는다. 초기 비밀번호는 서버가 고정값으로 설정한다.
+    employee_no를 받지 않는다. 사번은 서버가 발급한다. 사람이 마지막 번호를 찾아
+    다음 값을 계산할 일이 아니고, 형식이 강제되지 않으면 표기가 뒤섞인다.
+    여기에 정의하지 않았으므로 요청에 담아 보내도 무시된다.
+
+    login_id는 그대로 받는다. 사람이 기억하고 입력할 값이라 자동 생성이 부적절하다.
+
+    비밀번호 필드도 받지 않는다. 초기 비밀번호는 서버가 고정값으로 설정한다.
     status도 정의하지 않는다. 생성 시점의 상태는 항상 ACTIVE다.
     """
 
-    employee_no: str = Field(min_length=1, max_length=20)
     login_id: str = Field(min_length=1, max_length=50)
     name: str = Field(min_length=1, max_length=50)
     date_of_birth: date
