@@ -49,6 +49,7 @@ type CheckAction =
   | { type: 'HISTORY_LOADED'; items: BackgroundCheckListItem[] }
   | { type: 'HISTORY_FAILED'; message: string }
   | { type: 'SELECT'; id: number }
+  | { type: 'SELECT_CACHED'; id: number }
   | { type: 'DETAIL_LOADED'; detail: BackgroundCheckDetail }
   | { type: 'DETAIL_FAILED'; id: number; message: string }
   | { type: 'REQUEST_START' }
@@ -69,6 +70,17 @@ const INITIAL: CheckState = {
   ambiguous: null,
 }
 
+/**
+ * 완결된 조회인가. status가 pending이 아니고 세부까지 동기화됐다면
+ * (completed_at 채워짐) 백엔드는 이 레코드를 다시는 수정하지 않는다.
+ * 다시 받아와도 같은 값이므로 재조회하지 않는다. 재조회를 걸면
+ * 완료된 결과 밑에 스피너가 클릭마다 깜빡이고, 동기화가 덜 된 외부 API
+ * 상황에서는 불필요한 외부 호출까지 늘어난다.
+ */
+function isFinal(check: BackgroundCheckDetail | undefined): boolean {
+  return check !== undefined && check.status !== 'pending' && check.completed_at !== null
+}
+
 function merge(
   details: ReadonlyMap<number, BackgroundCheckDetail>,
   detail: BackgroundCheckDetail,
@@ -85,6 +97,9 @@ function reducer(state: CheckState, action: CheckAction): CheckState {
     case 'SELECT':
       // 선택은 즉시 바뀐다. 응답을 기다렸다가 바꾸면 느린 GET 동안 클릭이 죽는다.
       return { ...state, selectedId: action.id, loadingId: action.id, error: null }
+    case 'SELECT_CACHED':
+      // 재조회 없는 선택. 완결된 캐시를 그대로 보여주므로 로딩을 걸지 않는다.
+      return { ...state, selectedId: action.id, loadingId: null, error: null }
     case 'DETAIL_LOADED':
       return {
         ...state,
@@ -145,8 +160,21 @@ export function BackgroundCheckSection({
   const { polling, exhausted, rechecking, error: pollError, recheck } =
     useCheckPolling(selected, onUpdate)
 
+  // reducer 상태를 이벤트 핸들러에서 읽기 위한 최신값 미러.
+  // openDetail의 의존성에 details를 넣으면 병합 때마다 함수가 새로 만들어져
+  // loadHistory → useEffect가 연쇄 재실행된다.
+  const detailsRef = useRef(details)
+  useEffect(() => {
+    detailsRef.current = details
+  }, [details])
+
   // 선택을 즉시 바꾸고 상세는 백그라운드로 받는다. await하지 않는다.
   const openDetail = useCallback((id: number) => {
+    // 완결된 캐시는 다시 받지 않는다. 값이 변할 수 없는 레코드다.
+    if (isFinal(detailsRef.current.get(id))) {
+      dispatch({ type: 'SELECT_CACHED', id })
+      return
+    }
     dispatch({ type: 'SELECT', id })
     checksApi.getCheck(id).then(
       (detail) => dispatch({ type: 'DETAIL_LOADED', detail }),
