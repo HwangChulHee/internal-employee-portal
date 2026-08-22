@@ -452,6 +452,23 @@ export function BackgroundCheckSection({
                   <Spinner label="결과를 불러오는 중..." />
                 )}
                 {showPolling && <Spinner label="결과를 기다리는 중..." />}
+                {/* 완료됐는데 세부 동기화가 안 된 상태. 외부 API가 응답하지 않아
+                    동기화가 무산되면 여기 남는다. 안내 없이 두면 "완료인데 값이
+                    없는" 화면이 고장으로 읽히므로, 사유와 재시도 수단을 준다. */}
+                {!isFinal(selected) &&
+                  selected.status !== 'pending' &&
+                  !detailLoading && (
+                    <div className="space-y-2">
+                      <InfoMessage message="조회는 완료되었지만 세부 결과를 아직 받아오지 못했습니다. 외부 서비스가 응답하면 채워집니다." />
+                      <button
+                        type="button"
+                        onClick={() => openDetail(selected.id)}
+                        className="rounded-md px-3 py-1.5 text-sm text-slate-600 ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
+                      >
+                        다시 불러오기
+                      </button>
+                    </div>
+                  )}
                 <ErrorMessage message={pollError} />
                 {/* 소진 안내는 아직 pending일 때만 보인다. "다시 확인"으로
                     완료가 확인되면 결과만 남기고 안내는 치운다. */}

@@ -84,8 +84,18 @@ export function CheckResult({ check }: { check: BackgroundCheckDetail }) {
         />
         <Row
           label="완료 시각"
-          value={formatDateTime(check.completed_at)}
-          tone="text-slate-800"
+          // 완료 상태인데 completed_at이 비어 있으면 아직 세부 동기화 전이다.
+          // "—"(해당 없음)로 두면 조회가 끝났다는 배지와 모순돼 보인다.
+          value={
+            check.completed_at === null && check.status !== 'pending'
+              ? '확인 중'
+              : formatDateTime(check.completed_at)
+          }
+          tone={
+            check.completed_at === null && check.status !== 'pending'
+              ? 'text-slate-400'
+              : 'text-slate-800'
+          }
         />
       </div>
 
