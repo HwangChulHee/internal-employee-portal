@@ -323,17 +323,26 @@ except httpx.TimeoutException:
 
 **1. 프론트: 버튼 비활성화**
 
-요청이 나가는 동안(더블클릭 차단)과 **진행 중인 `pending` 조회가 있는 동안**
-(재클릭 차단) 요청 버튼을 비활성화하고 이유를 표시한다.
+요청이 나가는 동안(더블클릭 차단)과 **진행 중인 조회가 있는 동안**(재클릭 차단)
+요청 버튼을 비활성화하고 이유를 표시한다.
 409를 보여주는 것보다 애초에 못 누르게 하는 편이 낫다. 보안 수단은 아니다.
+
+판정 기준은 서버가 내려주는 `in_progress`다. 화면의 "조회 중" 배지와 같은 값이라
+배지와 버튼이 어긋나지 않고, 창을 넘긴 pending("응답 없음")은 잠금에서 빠진다.
+프론트가 같은 시간 창을 따로 들고 있으면 두 값이 어긋날 수 있어 서버에서 받는다.
 
 **2. 백엔드: 진행 중 조회 검사**
 
 ```python
+window_start = datetime.now(UTC) - timedelta(
+    seconds=settings.CHECK_IN_PROGRESS_WINDOW_SECONDS
+)
 existing = await db.scalar(
     select(BackgroundCheck).where(
         BackgroundCheck.employee_id == target.id,
         BackgroundCheck.status == CheckStatus.PENDING,
+        # 창이 없으면 완료될 수 없는 pending이 신규 조회를 영원히 막는다.
+        BackgroundCheck.requested_at > window_start,
     )
 )
 if existing is not None:
@@ -374,7 +383,9 @@ DB 제약이나 선점 패턴이 필요하다.
 ```python
 class BackgroundCheckClient(Protocol):
     async def create(self, req: CheckRequest) -> CheckCreated: ...
-    async def get(self, check_id: str) -> CheckResult: ...
+    async def get(
+        self, check_id: str, *, attempts: int | None = None
+    ) -> CheckResult: ...
     async def list_by_employee(self, employee_no: str) -> list[CheckSummary]: ...
     async def aclose(self) -> None: ...
 ```
@@ -474,7 +485,7 @@ USE_FAKE_API=true FAKE_MODE=always_503 uv run uvicorn app.main:app
 
 | 상황 | 문구 |
 |---|---|
-| 진행 중 | 조회 중입니다... |
+| 진행 중 | 배지 「조회 중」 + 「결과를 기다리는 중...」 |
 | 완료 | 결과 표시 |
 | 폴링 10회 소진 | 조회가 진행 중입니다. 잠시 후 다시 확인해 주세요. (+ [다시 확인] 버튼) |
 | 창(5분) 초과 | 외부 응답이 오랫동안 없습니다. 새 조회를 요청할 수 있고, 이 조회는 응답이 오면 채워집니다. |

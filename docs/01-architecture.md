@@ -112,24 +112,38 @@ FastAPI의 `Depends` 체인으로 인증과 인가를 분리한다.
 
 ```
 frontend/src/
-├── api/          API 호출 함수
-├── pages/        화면
+├── api/          API 호출 함수, 에러 타입
+├── auth/         인증 컨텍스트 (AuthProvider)
+├── pages/        화면 (로그인, 내 정보, 직원 목록·등록·상세)
 ├── components/   공용 컴포넌트
-└── hooks/        커스텀 훅
+├── hooks/        커스텀 훅 (폴링, 인증, 비밀번호 정책)
+├── checks.ts     신원조회 표시 규칙 (isFinal, displayStatus)
+├── routes.ts     역할별 랜딩 경로
+└── format.ts     날짜 표시
 ```
 
 상태관리 라이브러리는 도입하지 않는다.
-화면이 6개 수준이고 대부분이 서버 상태라 `useState`와 fetch로 충분하다.
+화면이 6개 수준이고 대부분이 서버 상태라 React 내장 훅과 fetch로 충분하다.
+
+다만 신원조회 영역만은 `useReducer`를 쓴다. 느린 상세 응답, 폴링, 새 요청이
+동시에 진행되는 화면이라 흩어진 `useState` 조합으로는 전이를 추적하기 어려웠다.
+액션 하나가 전이 하나이고, "늦게 도착한 응답은 현재 선택을 덮지 않는다" 같은
+규칙이 reducer 안에 명시된다.
+
+서버 상태 캐싱 라이브러리(TanStack Query 등)도 아직 도입하지 않는다.
+서버 동기화가 복잡한 화면이 신원조회 하나뿐이라, 도입 이득보다 기본값 조정과
+재검증 비용이 크다. 같은 성격의 화면이 하나 더 생기는 시점이 도입 적기다.
 
 ### 라우팅
 
 | 경로 | 접근 권한 |
 |---|---|
 | `/login` | 누구나 |
+| `/` | 인증 — 역할에 따라 `/me` 또는 `/admin/employees`로 보낸다 |
 | `/me` | 재직 중인 직원 |
 | `/admin/employees` | 관리자 |
 | `/admin/employees/new` | 관리자 |
-| `/admin/employees/:id` | 관리자 |
+| `/admin/employees/:employeeId` | 관리자 |
 
 프론트엔드 라우팅 가드는 UX를 위한 것이며 보안 수단이 아니다.
 모든 접근 제어는 백엔드에서 다시 검증한다.

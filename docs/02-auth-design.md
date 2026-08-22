@@ -262,9 +262,15 @@ class MeUpdate(BaseModel):
 | 필드 | 직원 본인 | 관리자 |
 |---|---|---|
 | `phone`, `address` | 수정 가능 | 수정 가능 |
-| `name`, `date_of_birth`, `employee_no` | 조회만 | 수정 가능 |
+| `name`, `date_of_birth` | 조회만 | 수정 가능 |
 | `department`, `position` | 조회만 | 수정 가능 |
-| `role`, `status` | 접근 불가 | 수정 가능 |
+| `role` | 접근 불가 | 수정 가능 |
+| `status` | 접근 불가 | 퇴사 엔드포인트로만 |
+| `employee_no`, `login_id` | 조회만 | 수정 불가 (식별자) |
+
+`EmployeeAdminUpdate`에는 `employee_no`·`login_id`·`status`가 없다.
+식별자 변경은 범위 밖이고 사번은 서버가 발급한다. 퇴사는 세션 삭제가 함께
+일어나야 하는 행위라 전용 엔드포인트로 분리했다.
 
 ### 응답 필드 통제
 
@@ -272,11 +278,13 @@ class MeUpdate(BaseModel):
 목록 API가 생년월일까지 전부 실어 보낼 이유가 없다.
 
 ```python
-class EmployeeListItem(BaseModel):   # 목록: 최소한
+class EmployeeListItem(BaseModel):   # 목록: 최소한 (생년월일·연락처 없음)
     id: int
+    employee_no: str
     name: str
     department: str | None
-    status: str
+    position: str | None
+    status: EmployeeStatus
 
 class EmployeeDetail(BaseModel):     # 상세: 전체
     ...
@@ -357,8 +365,13 @@ response.set_cookie(
     secure=settings.COOKIE_SECURE,    # 로컬 False, 배포 True
     samesite="lax",                   # CSRF 방어
     max_age=settings.SESSION_MAX_AGE_SECONDS,
+    path="/",
 )
 ```
+
+설정과 삭제를 `core/cookies.py` 한 곳에 둔다. 삭제 시 속성이 설정 때와
+하나라도 다르면 브라우저가 같은 쿠키로 인식하지 못해 지우지 않는다.
+로그인·로그아웃과 비밀번호 변경(세션이 사라지므로 쿠키도 지운다) 세 곳에서 쓴다.
 
 `HttpOnly`가 중요하다. XSS가 발생해도 세션 탈취가 어렵다.
 로컬 스토리지에 토큰을 저장하는 방식은 JS로 읽히므로 이 방어가 불가능하다.

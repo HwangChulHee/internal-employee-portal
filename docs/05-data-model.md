@@ -39,7 +39,8 @@ CREATE TABLE employees (
     employee_no   VARCHAR(20)  NOT NULL UNIQUE,
 
     -- 로그인 아이디. 초기 비밀번호는 이 값과 무관한 고정 상수다.
-    login_id      VARCHAR(50)  NOT NULL UNIQUE,
+    -- UNIQUE 제약을 컬럼에 걸지 않는다. 아래 유니크 인덱스가 그 역할을 한다.
+    login_id      VARCHAR(50)  NOT NULL,
 
     -- bcrypt 해시. 평문 저장 금지.
     password_hash VARCHAR(255) NOT NULL,
@@ -76,9 +77,17 @@ CREATE TABLE employees (
     CONSTRAINT ck_employees_status CHECK (status IN ('ACTIVE', 'RESIGNED'))
 );
 
--- 로그인 시 조회
-CREATE INDEX idx_employees_login_id ON employees(login_id);
+-- 로그인 시 조회 + 아이디 중복 방지
+CREATE UNIQUE INDEX idx_employees_login_id ON employees(login_id);
 ```
+
+`login_id`의 유니크를 컬럼 제약이 아니라 **인덱스**로 두는 이유가 있다.
+어차피 로그인마다 조회하므로 인덱스가 필요하고, 유니크 인덱스가 그 둘을 겸한다.
+`employee_no`는 조회 키가 아니라 컬럼 UNIQUE 제약으로 둔다.
+
+둘의 제약 이름 형식이 다르다는 점이 코드에 드러난다.
+`IntegrityError`를 사용자 메시지로 바꿀 때 제약 이름으로 어느 필드인지 판별하는데
+(`employees_employee_no_key` / `idx_employees_login_id`), 이 이름은 위 DDL이 정한 것이다.
 
 ### 사번 발급
 
@@ -126,7 +135,7 @@ UTC로 두면 1월 1일 오전에 등록한 직원이 아직 UTC로는 12월 31�
 
 **시드 데이터는 사번을 직접 지정한다**(`EMP-2024-xxx`).
 고정된 초기 상태를 만드는 것이 목적이고, 워크스루와 검증이 특정 사번을 참조하기 때문이다.
-채번은 올해 접두사만 보므로 시드의 `EMP-2024-009`가 있어도 올해 첫 사번은 `001`이다.
+채번은 올해 접두사만 보므로 시드의 `EMP-2024-010`이 있어도 올해 첫 사번은 `001`이다.
 
 ### 필드별 수정 권한
 

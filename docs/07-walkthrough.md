@@ -99,7 +99,7 @@ SELECT id, employee_id, status, sent_first_name, sent_last_name FROM background_
 
 ### 해보기
 
-`emp001` / `emp001`로 로그인한다.
+`emp001` / `bit1234`로 로그인한다.
 
 ### 관찰하기
 
@@ -154,7 +154,7 @@ LoginPage.tsx
 
 1. `emp001` / `wrong` (틀린 비밀번호)
 2. `nobody` / `x` (없는 아이디)
-3. `emp009` / `emp009` (퇴사자)
+3. `emp009` / `bit1234` (퇴사자)
 
 ### 관찰하기
 
@@ -207,7 +207,7 @@ services/auth_service.py: authenticate()
 ```bash
 # emp001로 로그인해 쿠키 저장
 curl -c c.txt -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" -d '{"login_id":"emp001","password":"emp001"}'
+  -H "Content-Type: application/json" -d '{"login_id":"emp001","password":"bit1234"}'
 
 # role을 ADMIN으로 바꾸려는 시도
 curl -b c.txt -X PATCH http://localhost:8000/api/me \
@@ -290,8 +290,10 @@ PATCH /api/me
 계산한다. 커서 방식은 정렬 키 관리가 늘어나는데, 이 규모에서 오프셋의 단점
 (깊은 페이지 스캔, 이동 중 삽입 시 한 건 밀림)은 실질적 문제가 아니다.
 신원조회 이력 목록도 같은 골격(`BackgroundCheckPage`)을 쓴다.
-이력은 requested_at 내림차순 고정이라 진행 중(pending) 조회가 항상
-1페이지 맨 위에 온다 — pending은 동시에 하나뿐이고 가장 최근 요청이다.
+이력은 requested_at 내림차순 고정이라 진행 중인 조회가 항상 1페이지 맨 위에 온다.
+5분 창 안의 pending은 동시에 하나뿐이기 때문이다(중복 방지가 그것을 보장한다).
+창을 넘긴 pending은 여러 개 남을 수 있으나 "응답 없음"으로 표시되며
+새 조회를 막지 않는다.
 
 ### 스스로 확인
 
@@ -326,7 +328,7 @@ await fetch('/api/employees', {
 ### 관찰하기
 
 - Network 탭: `POST /api/employees`, 요청에 **사번도 비밀번호도 없다**
-- 응답의 `employee_no`가 `EMP-{올해}-001`이다. 시드가 `EMP-2024-009`까지 있어도
+- 응답의 `employee_no`가 `EMP-{올해}-001`이다. 시드가 `EMP-2024-010`까지 있어도
   올해 접두사로는 처음이므로 `001`부터 시작한다
 - 연속 등록하면 `002`, `003`으로 증가한다
 - 위 콘솔 요청의 응답 사번은 `HACK-999`가 **아니다**. 스키마에 없는 필드라 무시된다
@@ -464,14 +466,17 @@ POST /api/employees
 POST .../background-checks
   → services/background_check_service.py: request_check()
       1. 퇴사자 여부 확인
-      2. 진행 중(pending) 조회 있으면 409
+      2. 진행 중(pending + 5분 창 안) 조회 있으면 409
       3. 이름 모호성 판별 (김민준은 모호하지 않음)
       4. external/name_mapper.py: 김민준 → ("민준", "김")
       5. external/http_client.py: 외부 API 호출 (재시도 포함)
       6. 응답을 background_checks에 INSERT (전송 이름 포함)
 
 폴링: GET /api/background-checks/{내부 PK}
-  → get_check(): status가 pending이면 외부에 재확인 → 갱신
+  → get_check(): 미완결이면(pending이거나 completed_at이 비었으면)
+                 외부에 재확인 → 갱신
+                 외부 호출은 재시도 없이 1회다. 실패하면 로컬 값을 반환하고
+                 3초 뒤 폴링에 맡긴다
 ```
 
 ### 설계 포인트
@@ -607,7 +612,7 @@ USE_FAKE_API=true FAKE_MODE=always_503 uv run uvicorn app.main:app --reload
 ```bash
 # 직원(emp002)으로 로그인
 curl -c e.txt -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" -d '{"login_id":"emp002","password":"emp002"}'
+  -H "Content-Type: application/json" -d '{"login_id":"emp002","password":"bit1234"}'
 
 # 1. 직원이 관리자 API(전체 목록) 호출
 curl -i -b e.txt http://localhost:8000/api/employees

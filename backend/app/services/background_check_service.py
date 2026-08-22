@@ -143,8 +143,9 @@ async def list_checks(
     우리 DB만 조회하고 외부 API를 호출하지 않는다.
     대상의 재직 상태를 검사하지 않는다. 퇴사자의 과거 이력도 조회할 수 있어야 한다.
 
-    requested_at 내림차순 고정이므로 진행 중(pending) 조회는 항상 1페이지
-    맨 위에 온다. pending은 동시에 하나뿐이고 가장 최근 요청이기 때문이다.
+    requested_at 내림차순 고정이므로 진행 중인 조회는 항상 1페이지 맨 위에 온다.
+    창 안의 pending은 중복 방지 때문에 동시에 하나뿐이다. 창을 넘긴 pending은
+    여러 개 남을 수 있으나 진행 중으로 치지 않는다(in_progress=False).
     """
     total = await db.scalar(
         select(func.count())
