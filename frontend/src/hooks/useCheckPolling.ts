@@ -99,6 +99,10 @@ export function useCheckPolling(
       cancelled = true
       controller.abort()
       window.clearTimeout(timer)
+      // 폴링 밖 경로(새로고침 등)로 완료가 확인되어 effect가 정리될 때,
+      // 진행 중이던 요청은 abort되어 catch의 setPolling(false)에 닿지 못한다.
+      // 여기서 내리지 않으면 polling이 true로 남는다.
+      setPolling(false)
     }
   }, [targetId, shouldPoll, onUpdate])
 

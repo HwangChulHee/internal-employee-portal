@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 
 import * as checksApi from '../api/backgroundChecks'
 import { ApiError, isAmbiguousSurname } from '../api/client'
@@ -19,38 +19,148 @@ import { useCheckPolling } from '../hooks/useCheckPolling'
  * 상태 구조에 대하여.
  *
  * 조회 데이터의 진실의 원천은 details 맵 하나다. 어떤 경로(이력 클릭, 폴링,
- * 다시 확인, 새 요청)로 상세 응답이 오든 이 맵에 병합되고, 선택은 selectedId
- * 라는 id 하나만 들고 있는다. 결과 패널과 목록 배지는 둘 다 이 맵에서
- * 파생되므로 서로 어긋날 수 없다.
+ * 다시 확인, 새 요청)로 상세 응답이 오든 DETAIL_LOADED로 이 맵에 병합되고,
+ * 선택은 selectedId라는 id 하나만 들고 있는다. 결과 패널과 목록 배지는 둘 다
+ * 이 맵에서 파생되므로 서로 어긋날 수 없다.
  *
- * 예전에는 같은 조회가 세 곳(history의 요약, selected 스냅샷, 폴링 훅의
- * 자체 복사본)에 있었고, 목록 배지는 "현재 선택된 항목"에만 최신 값을
- * 덮어썼다. 다른 항목을 클릭하는 순간 직전 항목이 history의 오래된 값으로
- * 되돌아가는 것이 그 구조의 필연이었다.
+ * 상태 전이를 reducer 한 곳에 모은 이유: 상세 GET은 빠르다는 보장이 없다.
+ * 미완결 건의 GET은 백엔드가 외부 API 동기화를 겸하는데, 외부가 503과
+ * retryAfter 30초를 주면 재시도까지 1분 넘게 걸릴 수 있다. 그 사이에
+ * 사용자는 다른 항목을 클릭하고, 폴링 응답이 도착하고, 새 요청이 생긴다.
+ * 흩어진 setState 조합으로는 이 동시 진행을 추적하기 어렵다.
+ *
+ * 그래서 선택과 로딩을 분리한다. SELECT는 즉시 반영되고(클릭이 씹히지
+ * 않는다), 응답은 나중에 DETAIL_LOADED로 도착한다. loadingId가 "지금
+ * 기다리는 응답"을 가리키므로 뒤늦게 도착한 응답이 로딩 표시를 잘못 끄거나
+ * 다른 선택을 덮어쓸 수 없다.
  */
+interface CheckState {
+  history: BackgroundCheckListItem[] | null
+  details: ReadonlyMap<number, BackgroundCheckDetail>
+  selectedId: number | null
+  /** 상세 응답을 기다리는 id. 선택(selectedId)과 별개다. */
+  loadingId: number | null
+  requesting: boolean
+  error: string | null
+  ambiguous: AmbiguousSurnameDetail | null
+}
+
+type CheckAction =
+  | { type: 'HISTORY_LOADED'; items: BackgroundCheckListItem[] }
+  | { type: 'HISTORY_FAILED'; message: string }
+  | { type: 'SELECT'; id: number }
+  | { type: 'DETAIL_LOADED'; detail: BackgroundCheckDetail }
+  | { type: 'DETAIL_FAILED'; id: number; message: string }
+  | { type: 'REQUEST_START' }
+  | { type: 'REQUEST_CREATED'; detail: BackgroundCheckDetail }
+  | { type: 'REQUEST_FAILED'; message: string }
+  | { type: 'REQUEST_DONE' }
+  | { type: 'AMBIGUOUS'; detail: AmbiguousSurnameDetail }
+  | { type: 'DIALOG_CANCELLED' }
+  | { type: 'CLEAR_ERROR' }
+
+const INITIAL: CheckState = {
+  history: null,
+  details: new Map(),
+  selectedId: null,
+  loadingId: null,
+  requesting: false,
+  error: null,
+  ambiguous: null,
+}
+
+function merge(
+  details: ReadonlyMap<number, BackgroundCheckDetail>,
+  detail: BackgroundCheckDetail,
+): ReadonlyMap<number, BackgroundCheckDetail> {
+  return new Map(details).set(detail.id, detail)
+}
+
+function reducer(state: CheckState, action: CheckAction): CheckState {
+  switch (action.type) {
+    case 'HISTORY_LOADED':
+      return { ...state, history: action.items }
+    case 'HISTORY_FAILED':
+      return { ...state, history: state.history ?? [], error: action.message }
+    case 'SELECT':
+      // 선택은 즉시 바뀐다. 응답을 기다렸다가 바꾸면 느린 GET 동안 클릭이 죽는다.
+      return { ...state, selectedId: action.id, loadingId: action.id, error: null }
+    case 'DETAIL_LOADED':
+      return {
+        ...state,
+        details: merge(state.details, action.detail),
+        // 다른 항목을 이미 클릭했다면(loadingId가 바뀌었다면) 로딩 표시를 건드리지 않는다.
+        loadingId: state.loadingId === action.detail.id ? null : state.loadingId,
+      }
+    case 'DETAIL_FAILED': {
+      // 이미 다른 선택으로 넘어갔으면 뒤늦은 실패는 무시한다.
+      if (state.loadingId !== action.id) return state
+      return {
+        ...state,
+        loadingId: null,
+        error: action.message,
+        // 보여줄 캐시조차 없으면 선택을 되돌려 빈 패널 대신 안내 문구를 남긴다.
+        selectedId: state.details.has(action.id) ? state.selectedId : null,
+      }
+    }
+    case 'REQUEST_START':
+      return { ...state, requesting: true, error: null }
+    case 'REQUEST_CREATED':
+      // 요약본이라도 즉시 병합·선택한다. 이후 동기화가 느려도 화면은 반응한다.
+      return {
+        ...state,
+        details: merge(state.details, action.detail),
+        selectedId: action.detail.id,
+        loadingId: null,
+        ambiguous: null,
+      }
+    case 'REQUEST_FAILED':
+      return { ...state, error: action.message, ambiguous: null }
+    case 'REQUEST_DONE':
+      return { ...state, requesting: false }
+    case 'AMBIGUOUS':
+      return { ...state, ambiguous: action.detail }
+    case 'DIALOG_CANCELLED':
+      return { ...state, ambiguous: null }
+    case 'CLEAR_ERROR':
+      return { ...state, error: null }
+  }
+}
+
 export function BackgroundCheckSection({
   employee,
 }: {
   employee: EmployeeDetail
 }) {
-  const [history, setHistory] = useState<BackgroundCheckListItem[] | null>(null)
-  const [details, setDetails] = useState<Map<number, BackgroundCheckDetail>>(
-    () => new Map(),
-  )
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [requesting, setRequesting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [ambiguous, setAmbiguous] = useState<AmbiguousSurnameDetail | null>(null)
-
-  // 상세 응답이 오는 모든 경로가 이 함수를 거친다.
-  const mergeDetail = useCallback((d: BackgroundCheckDetail) => {
-    setDetails((prev) => new Map(prev).set(d.id, d))
-  }, [])
+  const [state, dispatch] = useReducer(reducer, INITIAL)
+  const { history, details, selectedId, loadingId, requesting, error, ambiguous } =
+    state
 
   const selected = selectedId === null ? null : (details.get(selectedId) ?? null)
 
+  const onUpdate = useCallback((detail: BackgroundCheckDetail) => {
+    dispatch({ type: 'DETAIL_LOADED', detail })
+  }, [])
+
   const { polling, exhausted, rechecking, error: pollError, recheck } =
-    useCheckPolling(selected, mergeDetail)
+    useCheckPolling(selected, onUpdate)
+
+  // 선택을 즉시 바꾸고 상세는 백그라운드로 받는다. await하지 않는다.
+  const openDetail = useCallback((id: number) => {
+    dispatch({ type: 'SELECT', id })
+    checksApi.getCheck(id).then(
+      (detail) => dispatch({ type: 'DETAIL_LOADED', detail }),
+      (err: unknown) =>
+        dispatch({
+          type: 'DETAIL_FAILED',
+          id,
+          message:
+            err instanceof ApiError
+              ? err.displayMessage
+              : '결과를 불러오지 못했습니다',
+        }),
+    )
+  }, [])
 
   // 화면에 처음 들어왔을 때 가장 최근 이력을 자동으로 연다.
   // 없으면 pending인 조회를 두고 나갔다가 돌아와도 화면이 비어 있어,
@@ -60,23 +170,23 @@ export function BackgroundCheckSection({
   const loadHistory = useCallback(async () => {
     try {
       const items = await checksApi.listChecks(employee.id)
-      setHistory(items)
+      dispatch({ type: 'HISTORY_LOADED', items })
 
       if (!autoOpened.current && items.length > 0) {
         autoOpened.current = true
         // 백엔드가 requested_at 내림차순으로 준다. 첫 항목이 최신이다.
-        mergeDetail(await checksApi.getCheck(items[0].id))
-        setSelectedId(items[0].id)
+        openDetail(items[0].id)
       }
     } catch (err) {
-      setHistory([])
-      setError(
-        err instanceof ApiError
-          ? err.displayMessage
-          : '이력을 불러오지 못했습니다',
-      )
+      dispatch({
+        type: 'HISTORY_FAILED',
+        message:
+          err instanceof ApiError
+            ? err.displayMessage
+            : '이력을 불러오지 못했습니다',
+      })
     }
-  }, [employee.id, mergeDetail])
+  }, [employee.id, openDetail])
 
   useEffect(() => {
     void loadHistory()
@@ -85,11 +195,14 @@ export function BackgroundCheckSection({
   // "새로고침"은 목록만이 아니라 선택된 결과도 갱신한다.
   // 목록 배지만 바뀌고 결과 패널이 그대로면 어느 쪽이 맞는지 알 수 없다.
   async function refresh() {
-    setError(null)
+    dispatch({ type: 'CLEAR_ERROR' })
     await loadHistory()
     if (selectedId !== null) {
       try {
-        mergeDetail(await checksApi.getCheck(selectedId))
+        dispatch({
+          type: 'DETAIL_LOADED',
+          detail: await checksApi.getCheck(selectedId),
+        })
       } catch {
         // 목록은 이미 갱신됐다. 상세 실패를 화면 전체의 실패로 만들지 않는다.
       }
@@ -97,60 +210,46 @@ export function BackgroundCheckSection({
   }
 
   async function submitRequest(surname?: string) {
-    setError(null)
-    setRequesting(true)
+    dispatch({ type: 'REQUEST_START' })
     try {
-      let created = await checksApi.requestCheck(employee.id, surname)
+      const created = await checksApi.requestCheck(employee.id, surname)
+      dispatch({ type: 'REQUEST_CREATED', detail: created })
+      // 방금 만든 것을 이미 열었다. loadHistory가 같은 항목을 또 조회하지 않도록 막는다.
+      autoOpened.current = true
       // POST 응답에는 세부 결과 4필드와 completed_at이 담기지 않는다(외부 API의
-      // 생성 응답이 요약뿐이다). 즉시 완료된 조회를 그대로 보여주면 "이상 없음"
-      // 배지 밑에 모든 항목이 "확인 중"으로 남는 자기모순 화면이 된다.
-      // GET 한 번으로 백엔드가 외부와 동기화한 완전한 레코드를 받는다.
-      // pending이면 어차피 폴링의 첫 GET이 곧바로 나가므로 여기서는 건너뛴다.
+      // 생성 응답이 요약뿐이다). 즉시 완료된 조회는 GET 한 번으로 백엔드가
+      // 동기화한 완전한 레코드를 받는다. pending이면 폴링의 첫 GET이 곧바로
+      // 나가므로 건너뛴다.
       if (created.status !== 'pending') {
         try {
-          created = await checksApi.getCheck(created.id)
+          dispatch({
+            type: 'DETAIL_LOADED',
+            detail: await checksApi.getCheck(created.id),
+          })
         } catch {
-          // 동기화 실패면 요약본이라도 보여준다. 다음 클릭·새로고침에서 채워진다.
+          // 동기화 실패면 요약본이 남는다. 다음 클릭·새로고침에서 채워진다.
         }
       }
-      setAmbiguous(null)
-      mergeDetail(created)
-      setSelectedId(created.id)
-      // 방금 만든 것을 이미 열었다. 아래 loadHistory가 같은 항목을 또 조회하지 않도록 막는다.
-      autoOpened.current = true
       await loadHistory()
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
+      if (
+        err instanceof ApiError &&
+        err.status === 409 &&
+        isAmbiguousSurname(err.detail)
+      ) {
         // 409 중에서 이것만 detail이 객체다. 나머지는 문자열이다.
-        if (isAmbiguousSurname(err.detail)) {
-          setAmbiguous(err.detail)
-        } else {
-          setError(err.displayMessage)
-        }
+        dispatch({ type: 'AMBIGUOUS', detail: err.detail })
       } else {
-        setError(
-          err instanceof ApiError
-            ? err.displayMessage
-            : '조회를 요청하지 못했습니다',
-        )
+        dispatch({
+          type: 'REQUEST_FAILED',
+          message:
+            err instanceof ApiError
+              ? err.displayMessage
+              : '조회를 요청하지 못했습니다',
+        })
       }
     } finally {
-      setRequesting(false)
-    }
-  }
-
-  async function openDetail(id: number) {
-    setError(null)
-    try {
-      // 맵에 있어도 새로 받는다. 미완결 건은 이 GET이 백엔드 동기화를 겸한다.
-      mergeDetail(await checksApi.getCheck(id))
-      setSelectedId(id)
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.displayMessage
-          : '결과를 불러오지 못했습니다',
-      )
+      dispatch({ type: 'REQUEST_DONE' })
     }
   }
 
@@ -168,6 +267,14 @@ export function BackgroundCheckSection({
   // 진행 중인 조회가 있으면 요청 버튼을 비활성화한다. 백엔드도 409로 막지만,
   // 애초에 못 누르게 하는 것이 설계의 1차 방어선이다(docs/04 중복 방지).
   const hasPending = displayHistory?.some((h) => h.status === 'pending') ?? false
+
+  // 스피너는 상태 조합에서 파생시킨다.
+  // detailLoading: 선택한 항목의 상세 응답을 기다리는 중 (느린 동기화 포함)
+  // showPolling: pending이고 폴링이 도는 중. polling 플래그 단독으로 쓰지 않는
+  //   이유는, 폴링 밖 경로(새로고침 등)로 완료가 확인되면 플래그가 해제되기 전에
+  //   상태가 먼저 바뀔 수 있기 때문이다. 완료된 결과 위에 스피너를 남기지 않는다.
+  const detailLoading = selectedId !== null && loadingId === selectedId
+  const showPolling = polling && selected?.status === 'pending'
 
   return (
     <section className="rounded-lg bg-white p-5 ring-1 ring-slate-200">
@@ -235,7 +342,7 @@ export function BackgroundCheckSection({
                   <li key={h.id}>
                     <button
                       type="button"
-                      onClick={() => void openDetail(h.id)}
+                      onClick={() => openDetail(h.id)}
                       className={`flex w-full items-center justify-between px-3 py-2 text-left hover:bg-slate-50 ${
                         selectedId === h.id ? 'bg-slate-50' : ''
                       }`}
@@ -255,14 +362,23 @@ export function BackgroundCheckSection({
         <div>
           <h3 className="text-xs font-medium text-slate-500">조회 결과</h3>
           <div className="mt-2 rounded-md ring-1 ring-slate-200">
-            {selected === null ? (
+            {selectedId === null ? (
               <div className="px-3 py-8 text-center text-sm text-slate-400">
                 이력을 선택하거나 새 조회를 요청하세요.
+              </div>
+            ) : selected === null ? (
+              // 선택은 됐지만 상세가 아직 없다. 미완결 건은 백엔드가 외부 동기화를
+              // 겸해서 이 구간이 수십 초일 수 있다. 반드시 표시가 있어야 한다.
+              <div className="px-3 py-8">
+                <Spinner label="결과를 불러오는 중..." />
               </div>
             ) : (
               <div className="space-y-3 p-3">
                 <CheckResult check={selected} />
-                {polling && <Spinner label="결과를 기다리는 중..." />}
+                {detailLoading && !showPolling && (
+                  <Spinner label="결과를 불러오는 중..." />
+                )}
+                {showPolling && <Spinner label="결과를 기다리는 중..." />}
                 <ErrorMessage message={pollError} />
                 {/* 소진 안내는 아직 pending일 때만 보인다. "다시 확인"으로
                     완료가 확인되면 결과만 남기고 안내는 치운다. */}
@@ -289,7 +405,7 @@ export function BackgroundCheckSection({
       <SurnameDialog
         detail={ambiguous}
         busy={requesting}
-        onCancel={() => setAmbiguous(null)}
+        onCancel={() => dispatch({ type: 'DIALOG_CANCELLED' })}
         onSelect={(surname) => void submitRequest(surname)}
       />
     </section>
