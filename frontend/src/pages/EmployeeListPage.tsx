@@ -11,8 +11,7 @@ import { Spinner } from '../components/Spinner'
 
 type StatusFilter = EmployeeStatus | ''
 
-// 시드 10명으로도 페이징이 동작하는 것이 보이도록 한 페이지를 작게 잡는다.
-const PAGE_SIZE = 5
+const PAGE_SIZE = 10
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   // 기본값이 전체다. 관리자는 퇴사자도 조회할 수 있어야 하므로 숨기지 않는다.
