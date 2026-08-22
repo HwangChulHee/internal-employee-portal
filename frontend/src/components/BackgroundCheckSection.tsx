@@ -261,22 +261,21 @@ export function BackgroundCheckSection({
       dispatch({ type: 'REQUEST_CREATED', detail: created })
       // 방금 만든 것을 이미 열었다. loadHistory가 같은 항목을 또 조회하지 않도록 막는다.
       autoOpened.current = true
+      // 목록부터 갱신한다. DB 조회라 빠르고, 새 항목이 즉시 왼쪽에 나타난다.
+      // 새 항목은 항상 최신이므로 1페이지로 돌아간다.
+      await loadHistory(1)
       // POST 응답에는 세부 결과 4필드와 completed_at이 담기지 않는다(외부 API의
       // 생성 응답이 요약뿐이다). 즉시 완료된 조회는 GET 한 번으로 백엔드가
       // 동기화한 완전한 레코드를 받는다. pending이면 폴링의 첫 GET이 곧바로
       // 나가므로 건너뛴다.
+      //
+      // 이 GET을 기다리지 않는다. 백엔드 동기화가 외부 재시도(503 → 30초 대기)를
+      // 타면 1분 가까이 걸리는데, 그동안 await로 잡아두면 목록도 안 갱신되고
+      // 버튼도 "요청 중..."으로 잠긴 채 화면이 굳는다. 실제로 그렇게 보였다.
+      // openDetail이 로딩 표시를 걸고 백그라운드로 받아온다.
       if (created.status !== 'pending') {
-        try {
-          dispatch({
-            type: 'DETAIL_LOADED',
-            detail: await checksApi.getCheck(created.id),
-          })
-        } catch {
-          // 동기화 실패면 요약본이 남는다. 다음 클릭·새로고침에서 채워진다.
-        }
+        openDetail(created.id)
       }
-      // 새 항목은 항상 최신이므로 1페이지로 돌아간다.
-      await loadHistory(1)
     } catch (err) {
       if (
         err instanceof ApiError &&
@@ -429,8 +428,22 @@ export function BackgroundCheckSection({
             ) : selected === null ? (
               // 선택은 됐지만 상세가 아직 없다. 미완결 건은 백엔드가 외부 동기화를
               // 겸해서 이 구간이 수십 초일 수 있다. 반드시 표시가 있어야 한다.
-              <div className="px-3 py-8">
-                <Spinner label="결과를 불러오는 중..." />
+              //
+              // 스피너만 있으면 조회 자체가 진행 중인 것으로 읽혀 목록의 완료
+              // 배지와 모순돼 보인다. 이미 아는 상태(목록의 배지)를 함께 보여
+              // "조회는 끝났고 세부를 받아오는 중"임이 드러나게 한다.
+              <div className="space-y-3 px-3 py-8">
+                {(() => {
+                  const summary = displayHistory?.find(
+                    (h) => h.id === selectedId,
+                  )
+                  return summary ? (
+                    <div className="flex justify-center">
+                      <CheckStatusBadge status={summary.status} />
+                    </div>
+                  ) : null
+                })()}
+                <Spinner label="세부 결과를 불러오는 중..." />
               </div>
             ) : (
               <div className="space-y-3 p-3">
