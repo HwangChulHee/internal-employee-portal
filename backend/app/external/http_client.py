@@ -59,6 +59,7 @@ class HttpClient:
         retry_on_timeout: bool,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        max_attempts: int | None = None,
     ) -> Any:
         """재시도를 포함한 요청.
 
@@ -68,8 +69,12 @@ class HttpClient:
         retry_on_timeout은 멱등한 요청(GET)에만 True로 준다.
         POST는 서버 상태를 알 수 없어 여기서 재시도하지 않고, create()가
         "이미 생성되었는지 확인" 절차를 거친다.
+
+        max_attempts로 시도 횟수를 줄일 수 있다(기본은 설정값).
+        바깥에 이미 재시도 루프가 있는 호출(폴링의 동기화)은 안에서 또
+        버틸 이유가 없으므로 1을 준다.
         """
-        max_attempts = settings.EXTERNAL_MAX_RETRIES
+        max_attempts = max_attempts or settings.EXTERNAL_MAX_RETRIES
         last_error: Exception | None = None
 
         for attempt in range(1, max_attempts + 1):
@@ -198,9 +203,12 @@ class HttpClient:
             return None
         return max(recent, key=lambda c: c.created_at)
 
-    async def get(self, check_id: str) -> CheckResult:
+    async def get(self, check_id: str, *, attempts: int | None = None) -> CheckResult:
         data = await self._request(
-            "GET", f"{_CHECKS_PATH}/{check_id}", retry_on_timeout=True
+            "GET",
+            f"{_CHECKS_PATH}/{check_id}",
+            retry_on_timeout=True,
+            max_attempts=attempts,
         )
         return CheckResult(
             check_id=data["checkId"],

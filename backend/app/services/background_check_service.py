@@ -175,7 +175,12 @@ async def get_check(
         return check
 
     try:
-        result = await client.get(check.check_id)
+        # 시도는 1회뿐이다. 재시도 정책(503이면 retryAfter만큼 대기)을 그대로
+        # 타면 이 GET 하나가 1분 가까이 걸려 프론트가 그동안 응답을 못 받는다.
+        # 이 경로는 폴링(3초 간격)이 계속 다시 오므로 재시도 루프가 이미
+        # 바깥에 있다. 안에서 또 버티는 것은 같은 일을 더 비싸게 반복하는
+        # 것이다. 실패하면 아래에서 로컬 값을 반환하고 다음 폴링에 맡긴다.
+        result = await client.get(check.check_id, attempts=1)
     except Exception as exc:  # noqa: BLE001  아래 주석 참조 — 의도적으로 넓게 잡는다
         # 동기화 실패가 조회 실패가 되면 안 된다.
         # 외부 API가 죽어도 과거 결과는 보여줄 수 있어야 한다는 것이
