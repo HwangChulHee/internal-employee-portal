@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import CheckStatus, CreditScore
+from app.schemas.pagination import PageMeta
 
 
 class CheckCreateRequest(BaseModel):
@@ -27,6 +28,12 @@ class BackgroundCheckListItem(BaseModel):
     status: CheckStatus
     requested_at: datetime
     completed_at: datetime | None
+
+
+class BackgroundCheckPage(PageMeta):
+    """조회 이력 페이지 응답."""
+
+    items: list[BackgroundCheckListItem]
 
 
 class BackgroundCheckDetail(BaseModel):

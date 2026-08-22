@@ -6,7 +6,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import AdminEmployee
@@ -16,7 +16,7 @@ from app.external.deps import get_check_client
 from app.models import BackgroundCheck
 from app.schemas.background_check import (
     BackgroundCheckDetail,
-    BackgroundCheckListItem,
+    BackgroundCheckPage,
     CheckCreateRequest,
 )
 from app.services import background_check_service, employee_service
@@ -48,17 +48,22 @@ async def request_background_check(
 
 @employee_router.get(
     "/{employee_id}/background-checks",
-    response_model=list[BackgroundCheckListItem],
+    response_model=BackgroundCheckPage,
 )
 async def list_background_checks(
     employee_id: int,
     admin: AdminEmployee,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> list[BackgroundCheck]:
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+) -> BackgroundCheckPage:
     # 대상이 존재하는지는 확인하되, 재직 상태는 보지 않는다.
     # 퇴사자의 과거 이력도 조회할 수 있어야 한다.
     await employee_service.get_employee(db, employee_id)
-    return await background_check_service.list_checks(db, employee_id)
+    items, total = await background_check_service.list_checks(
+        db, employee_id, page=page, page_size=page_size
+    )
+    return BackgroundCheckPage(items=items, total=total, page=page, page_size=page_size)
 
 
 @check_router.get("/{background_check_id}", response_model=BackgroundCheckDetail)

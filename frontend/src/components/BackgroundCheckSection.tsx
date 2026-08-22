@@ -7,11 +7,13 @@ import type {
   BackgroundCheckDetail,
   BackgroundCheckListItem,
   EmployeeDetail,
+  Page,
 } from '../api/types'
 import { CheckStatusBadge } from './Badge'
 import { formatDateTime } from '../format'
 import { CheckResult } from './CheckResult'
 import { EmptyState, ErrorMessage, InfoMessage } from './ErrorMessage'
+import { Pager } from './Pager'
 import { Spinner } from './Spinner'
 import { useCheckPolling } from '../hooks/useCheckPolling'
 
@@ -34,8 +36,11 @@ import { useCheckPolling } from '../hooks/useCheckPolling'
  * 기다리는 응답"을 가리키므로 뒤늦게 도착한 응답이 로딩 표시를 잘못 끄거나
  * 다른 선택을 덮어쓸 수 없다.
  */
+// 이력도 페이지 단위다. 시드·실사용 모두에서 이력이 늘어나면 한 화면에 다 못 싣는다.
+const HISTORY_PAGE_SIZE = 5
+
 interface CheckState {
-  history: BackgroundCheckListItem[] | null
+  history: Page<BackgroundCheckListItem> | null
   details: ReadonlyMap<number, BackgroundCheckDetail>
   selectedId: number | null
   /** 상세 응답을 기다리는 id. 선택(selectedId)과 별개다. */
@@ -46,7 +51,7 @@ interface CheckState {
 }
 
 type CheckAction =
-  | { type: 'HISTORY_LOADED'; items: BackgroundCheckListItem[] }
+  | { type: 'HISTORY_LOADED'; result: Page<BackgroundCheckListItem> }
   | { type: 'HISTORY_FAILED'; message: string }
   | { type: 'SELECT'; id: number }
   | { type: 'SELECT_CACHED'; id: number }
@@ -91,9 +96,13 @@ function merge(
 function reducer(state: CheckState, action: CheckAction): CheckState {
   switch (action.type) {
     case 'HISTORY_LOADED':
-      return { ...state, history: action.items }
+      return { ...state, history: action.result }
     case 'HISTORY_FAILED':
-      return { ...state, history: state.history ?? [], error: action.message }
+      return {
+        ...state,
+        history: state.history ?? { items: [], total: 0, page: 1, page_size: HISTORY_PAGE_SIZE },
+        error: action.message,
+      }
     case 'SELECT':
       // 선택은 즉시 바뀐다. 응답을 기다렸다가 바꾸면 느린 GET 동안 클릭이 죽는다.
       return { ...state, selectedId: action.id, loadingId: action.id, error: null }
@@ -195,26 +204,33 @@ export function BackgroundCheckSection({
   // 관리자가 이력을 클릭하기 전까지 상태가 갱신되지 않는다.
   const autoOpened = useRef(false)
 
-  const loadHistory = useCallback(async () => {
-    try {
-      const items = await checksApi.listChecks(employee.id)
-      dispatch({ type: 'HISTORY_LOADED', items })
+  const loadHistory = useCallback(
+    async (page = 1) => {
+      try {
+        const result = await checksApi.listChecks(
+          employee.id,
+          page,
+          HISTORY_PAGE_SIZE,
+        )
+        dispatch({ type: 'HISTORY_LOADED', result })
 
-      if (!autoOpened.current && items.length > 0) {
-        autoOpened.current = true
-        // 백엔드가 requested_at 내림차순으로 준다. 첫 항목이 최신이다.
-        openDetail(items[0].id)
+        if (!autoOpened.current && result.items.length > 0) {
+          autoOpened.current = true
+          // 백엔드가 requested_at 내림차순으로 준다. 1페이지 첫 항목이 최신이다.
+          openDetail(result.items[0].id)
+        }
+      } catch (err) {
+        dispatch({
+          type: 'HISTORY_FAILED',
+          message:
+            err instanceof ApiError
+              ? err.displayMessage
+              : '이력을 불러오지 못했습니다',
+        })
       }
-    } catch (err) {
-      dispatch({
-        type: 'HISTORY_FAILED',
-        message:
-          err instanceof ApiError
-            ? err.displayMessage
-            : '이력을 불러오지 못했습니다',
-      })
-    }
-  }, [employee.id, openDetail])
+    },
+    [employee.id, openDetail],
+  )
 
   useEffect(() => {
     void loadHistory()
@@ -224,7 +240,8 @@ export function BackgroundCheckSection({
   // 목록 배지만 바뀌고 결과 패널이 그대로면 어느 쪽이 맞는지 알 수 없다.
   async function refresh() {
     dispatch({ type: 'CLEAR_ERROR' })
-    await loadHistory()
+    // 보고 있던 페이지를 유지한 채 다시 받는다.
+    await loadHistory(history?.page ?? 1)
     if (selectedId !== null) {
       try {
         dispatch({
@@ -258,7 +275,8 @@ export function BackgroundCheckSection({
           // 동기화 실패면 요약본이 남는다. 다음 클릭·새로고침에서 채워진다.
         }
       }
-      await loadHistory()
+      // 새 항목은 항상 최신이므로 1페이지로 돌아간다.
+      await loadHistory(1)
     } catch (err) {
       if (
         err instanceof ApiError &&
@@ -286,7 +304,7 @@ export function BackgroundCheckSection({
   const displayHistory =
     history === null
       ? null
-      : history.map((h) => {
+      : history.items.map((h) => {
           const d = details.get(h.id)
           return d ? { ...h, status: d.status, completed_at: d.completed_at } : h
         })
@@ -294,7 +312,11 @@ export function BackgroundCheckSection({
   const resigned = employee.status === 'RESIGNED'
   // 진행 중인 조회가 있으면 요청 버튼을 비활성화한다. 백엔드도 409로 막지만,
   // 애초에 못 누르게 하는 것이 설계의 1차 방어선이다(docs/04 중복 방지).
-  const hasPending = displayHistory?.some((h) => h.status === 'pending') ?? false
+  // 캐시(details)도 함께 본다. pending은 항상 1페이지 맨 위에 오지만,
+  // 다른 페이지를 보는 동안에도 폴링이 캐시를 최신으로 유지하고 있다.
+  const hasPending =
+    (displayHistory?.some((h) => h.status === 'pending') ?? false) ||
+    [...details.values()].some((d) => d.status === 'pending')
 
   // 스피너는 상태 조합에서 파생시킨다.
   // detailLoading: 선택한 항목의 상세 응답을 기다리는 중 (느린 동기화 포함)
@@ -383,6 +405,16 @@ export function BackgroundCheckSection({
                   </li>
                 ))}
               </ul>
+            )}
+            {history !== null && (
+              <div className="mt-2">
+                <Pager
+                  page={history.page}
+                  total={history.total}
+                  pageSize={HISTORY_PAGE_SIZE}
+                  onChange={(p) => void loadHistory(p)}
+                />
+              </div>
             )}
           </div>
         </div>

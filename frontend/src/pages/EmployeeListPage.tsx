@@ -3,12 +3,16 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import { ApiError } from '../api/client'
 import * as employeesApi from '../api/employees'
-import type { EmployeeListItem, EmployeeStatus } from '../api/types'
+import type { EmployeeListItem, EmployeeStatus, Page } from '../api/types'
 import { EmployeeStatusBadge } from '../components/Badge'
 import { EmptyState, ErrorMessage } from '../components/ErrorMessage'
+import { Pager } from '../components/Pager'
 import { Spinner } from '../components/Spinner'
 
 type StatusFilter = EmployeeStatus | ''
+
+// 시드 10명으로도 페이징이 동작하는 것이 보이도록 한 페이지를 작게 잡는다.
+const PAGE_SIZE = 5
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   // 기본값이 전체다. 관리자는 퇴사자도 조회할 수 있어야 하므로 숨기지 않는다.
@@ -21,15 +25,23 @@ export function EmployeeListPage() {
   const navigate = useNavigate()
   const [status, setStatus] = useState<StatusFilter>('')
   const [query, setQuery] = useState('')
-  const [items, setItems] = useState<EmployeeListItem[] | null>(null)
+  const [page, setPage] = useState(1)
+  const [result, setResult] = useState<Page<EmployeeListItem> | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async (s: StatusFilter, q: string) => {
+  const load = useCallback(async (s: StatusFilter, q: string, p: number) => {
     setError(null)
     try {
-      setItems(await employeesApi.listEmployees({ status: s, q }))
+      setResult(
+        await employeesApi.listEmployees({
+          status: s,
+          q,
+          page: p,
+          pageSize: PAGE_SIZE,
+        }),
+      )
     } catch (err) {
-      setItems([])
+      setResult({ items: [], total: 0, page: 1, page_size: PAGE_SIZE })
       setError(
         err instanceof ApiError
           ? err.displayMessage
@@ -39,10 +51,17 @@ export function EmployeeListPage() {
   }, [])
 
   useEffect(() => {
-    void load(status, query)
+    void load(status, query, page)
     // query는 제출 시점에만 반영한다. 입력할 때마다 호출하지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, load])
+  }, [status, page, load])
+
+  // 필터·검색이 바뀌면 1페이지부터 다시 본다. 조건이 바뀌었는데 3페이지에
+  // 머물러 있으면 빈 화면이 나온다.
+  function changeStatus(next: StatusFilter) {
+    setStatus(next)
+    setPage(1)
+  }
 
   return (
     <div className="space-y-4">
@@ -62,7 +81,7 @@ export function EmployeeListPage() {
             <button
               key={f.label}
               type="button"
-              onClick={() => setStatus(f.value)}
+              onClick={() => changeStatus(f.value)}
               className={`rounded-md px-3 py-1.5 text-sm ${
                 status === f.value
                   ? 'bg-slate-800 font-medium text-white'
@@ -78,7 +97,8 @@ export function EmployeeListPage() {
           className="flex flex-1 gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            void load(status, query)
+            setPage(1)
+            void load(status, query, 1)
           }}
         >
           <input
@@ -99,9 +119,9 @@ export function EmployeeListPage() {
 
       <ErrorMessage message={error} />
 
-      {items === null ? (
+      {result === null ? (
         <Spinner />
-      ) : items.length === 0 ? (
+      ) : result.items.length === 0 ? (
         <EmptyState message="조건에 맞는 직원이 없습니다." />
       ) : (
         <div className="overflow-x-auto rounded-lg bg-white ring-1 ring-slate-200">
@@ -116,7 +136,7 @@ export function EmployeeListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {items.map((e) => (
+              {result.items.map((e) => (
                 <tr
                   key={e.id}
                   onClick={() => navigate(`/admin/employees/${e.id}`)}
@@ -140,10 +160,16 @@ export function EmployeeListPage() {
         </div>
       )}
 
-      <p className="text-xs text-slate-400">
-        총 {items?.length ?? 0}명 · 200명 규모라 페이지네이션 없이 전체를
-        표시합니다.
-      </p>
+      {result !== null && (
+        <Pager
+          page={page}
+          total={result.total}
+          pageSize={PAGE_SIZE}
+          onChange={setPage}
+        />
+      )}
+
+      <p className="text-xs text-slate-400">총 {result?.total ?? 0}명</p>
     </div>
   )
 }

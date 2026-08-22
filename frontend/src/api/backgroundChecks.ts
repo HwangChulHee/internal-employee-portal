@@ -1,11 +1,13 @@
 import { apiJson, jsonBody } from './client'
-import type { BackgroundCheckDetail, BackgroundCheckListItem } from './types'
+import type { BackgroundCheckDetail, BackgroundCheckListItem, Page } from './types'
 
 export function listChecks(
   employeeId: number,
-): Promise<BackgroundCheckListItem[]> {
-  return apiJson<BackgroundCheckListItem[]>(
-    `/api/employees/${employeeId}/background-checks`,
+  page = 1,
+  pageSize = 5,
+): Promise<Page<BackgroundCheckListItem>> {
+  return apiJson<Page<BackgroundCheckListItem>>(
+    `/api/employees/${employeeId}/background-checks?page=${page}&page_size=${pageSize}`,
   )
 }
 

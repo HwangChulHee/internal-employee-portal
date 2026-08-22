@@ -11,7 +11,7 @@ import logging
 
 from fastapi import HTTPException
 from fastapi import status as http_status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.external.base import (
@@ -125,17 +125,30 @@ async def request_check(
     return check
 
 
-async def list_checks(db: AsyncSession, employee_id: int) -> list[BackgroundCheck]:
-    """이력 목록. 우리 DB만 조회하고 외부 API를 호출하지 않는다.
+async def list_checks(
+    db: AsyncSession, employee_id: int, page: int = 1, page_size: int = 10
+) -> tuple[list[BackgroundCheck], int]:
+    """이력 목록. (해당 페이지 항목, 전체 건수)를 반환한다.
 
+    우리 DB만 조회하고 외부 API를 호출하지 않는다.
     대상의 재직 상태를 검사하지 않는다. 퇴사자의 과거 이력도 조회할 수 있어야 한다.
+
+    requested_at 내림차순 고정이므로 진행 중(pending) 조회는 항상 1페이지
+    맨 위에 온다. pending은 동시에 하나뿐이고 가장 최근 요청이기 때문이다.
     """
+    total = await db.scalar(
+        select(func.count())
+        .select_from(BackgroundCheck)
+        .where(BackgroundCheck.employee_id == employee_id)
+    )
     stmt = (
         select(BackgroundCheck)
         .where(BackgroundCheck.employee_id == employee_id)
         .order_by(BackgroundCheck.requested_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return list((await db.scalars(stmt)).all())
+    return list((await db.scalars(stmt)).all()), total or 0
 
 
 def _needs_sync(check: BackgroundCheck) -> bool:

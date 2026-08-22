@@ -7,17 +7,22 @@ import type {
   EmployeeListItem,
   EmployeeStatus,
   MessageResponse,
+  Page,
 } from './types'
 
 export function listEmployees(params: {
   status?: EmployeeStatus | ''
   q?: string
-}): Promise<EmployeeListItem[]> {
+  page?: number
+  pageSize?: number
+}): Promise<Page<EmployeeListItem>> {
   const search = new URLSearchParams()
   if (params.status) search.set('status', params.status)
   if (params.q?.trim()) search.set('q', params.q.trim())
+  if (params.page) search.set('page', String(params.page))
+  if (params.pageSize) search.set('page_size', String(params.pageSize))
   const qs = search.toString()
-  return apiJson<EmployeeListItem[]>(`/api/employees${qs ? `?${qs}` : ''}`)
+  return apiJson<Page<EmployeeListItem>>(`/api/employees${qs ? `?${qs}` : ''}`)
 }
 
 export function getEmployee(employeeId: number): Promise<EmployeeDetail> {

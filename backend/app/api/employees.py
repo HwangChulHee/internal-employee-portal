@@ -19,14 +19,14 @@ from app.schemas.employee import (
     EmployeeCreate,
     EmployeeCreated,
     EmployeeDetail,
-    EmployeeListItem,
+    EmployeePage,
 )
 from app.services import employee_service
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 
 
-@router.get("", response_model=list[EmployeeListItem])
+@router.get("", response_model=EmployeePage)
 async def list_employees(
     admin: AdminEmployee,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -35,8 +35,13 @@ async def list_employees(
         Query(alias="status", description="재직 상태 필터. 미지정 시 전체"),
     ] = None,
     q: Annotated[str | None, Query(description="이름 또는 사번 부분 검색")] = None,
-) -> list[Employee]:
-    return await employee_service.list_employees(db, status=status_filter, q=q)
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+) -> EmployeePage:
+    items, total = await employee_service.list_employees(
+        db, status=status_filter, q=q, page=page, page_size=page_size
+    )
+    return EmployeePage(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post("", response_model=EmployeeCreated, status_code=status.HTTP_201_CREATED)

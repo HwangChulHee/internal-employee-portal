@@ -3,6 +3,7 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import EmployeeStatus, Role
+from app.schemas.pagination import PageMeta
 
 
 class MeResponse(BaseModel):
@@ -86,6 +87,12 @@ class EmployeeListItem(BaseModel):
     department: str | None
     position: str | None
     status: EmployeeStatus
+
+
+class EmployeePage(PageMeta):
+    """직원 목록 페이지 응답."""
+
+    items: list[EmployeeListItem]
 
 
 class EmployeeDetail(BaseModel):

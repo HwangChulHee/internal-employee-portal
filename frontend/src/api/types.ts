@@ -47,6 +47,14 @@ export interface MeUpdate {
   address?: string | null
 }
 
+/** 목록 응답의 공통 골격. total로 전체 페이지 수를 계산한다. */
+export interface Page<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface EmployeeListItem {
   id: number
   employee_no: string

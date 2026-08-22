@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from fastapi import status as http_status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,30 +71,43 @@ async def list_employees(
     db: AsyncSession,
     status: EmployeeStatus | None = None,
     q: str | None = None,
-) -> list[Employee]:
-    """직원 목록.
+    page: int = 1,
+    page_size: int = 10,
+) -> tuple[list[Employee], int]:
+    """직원 목록. (해당 페이지 항목, 필터 조건의 전체 건수)를 반환한다.
 
     퇴사자를 기본으로 제외하지 않는다. 관리자는 퇴사자도 조회할 수 있어야 한다.
     필터는 선택 사항으로만 제공한다.
 
-    페이지네이션은 두지 않는다. 200명 규모에서는 전체를 한 번에 보내는 편이
-    단순하고, 커서·오프셋 관리 비용이 이득을 넘어선다. 규모가 커지면 그때 넣는다.
+    오프셋 페이지네이션을 쓴다. 커서 방식은 정렬 키 관리가 늘어나는데,
+    이 규모에서 오프셋의 단점(깊은 페이지의 스캔 비용, 페이지 이동 중 삽입 시
+    한 건이 밀리는 현상)은 실질적 문제가 아니다.
+
+    total은 필터가 적용된 건수다. 프론트가 전체 페이지 수를 계산하는 데 쓴다.
     """
-    stmt = select(Employee)
-
+    conditions = []
     if status is not None:
-        stmt = stmt.where(Employee.status == status)
-
+        conditions.append(Employee.status == status)
     if q:
         pattern = f"%{q}%"
-        stmt = stmt.where(
+        conditions.append(
             or_(Employee.name.ilike(pattern), Employee.employee_no.ilike(pattern))
         )
 
-    # 매 요청 순서가 달라지면 화면이 흔들리므로 정렬을 고정한다.
-    stmt = stmt.order_by(Employee.employee_no)
+    total = await db.scalar(
+        select(func.count()).select_from(Employee).where(*conditions)
+    )
 
-    return list((await db.scalars(stmt)).all())
+    # 매 요청 순서가 달라지면 화면이 흔들리므로 정렬을 고정한다.
+    stmt = (
+        select(Employee)
+        .where(*conditions)
+        .order_by(Employee.employee_no)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    return list((await db.scalars(stmt)).all()), total or 0
 
 
 async def get_employee(db: AsyncSession, employee_id: int) -> Employee:
