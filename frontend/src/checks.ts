@@ -30,3 +30,33 @@ export function displayStatus(
 ): CheckStatus {
   return isFinal(check) ? check.status : 'pending'
 }
+
+/**
+ * 목록 요약만으로 결과 패널의 틀을 그리기 위한 자리표시 상세.
+ *
+ * 상세 응답이 오기 전에도 패널이 같은 틀(범죄이력·학력·경력·신용 행과
+ * 요청/완료 시각)을 유지해야 화면이 로딩 여부에 따라 널뛰지 않는다.
+ * 요약이 아는 값(상태·요청시각·완료시각)은 그대로 쓰고, 상세만 아는 값
+ * (전송 이름, 외부 check_id, 세부 4필드)은 비워 둔다 — CheckResult가
+ * 빈 값을 "확인 중"으로 그린다.
+ */
+export function placeholderDetail(
+  item: BackgroundCheckListItem,
+  employeeId: number,
+): BackgroundCheckDetail {
+  return {
+    id: item.id,
+    employee_id: employeeId,
+    status: item.status,
+    check_id: '',
+    sent_first_name: '',
+    sent_last_name: '',
+    criminal_record: null,
+    education_verified: null,
+    employment_verified: null,
+    credit_score: null,
+    requested_at: item.requested_at,
+    completed_at: item.completed_at,
+    created_by: 0,
+  }
+}

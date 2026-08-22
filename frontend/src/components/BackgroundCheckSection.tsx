@@ -10,7 +10,7 @@ import type {
   Page,
 } from '../api/types'
 import { CheckStatusBadge } from './Badge'
-import { displayStatus, isFinal } from '../checks'
+import { displayStatus, isFinal, placeholderDetail } from '../checks'
 import { formatDateTime } from '../format'
 import { CheckResult } from './CheckResult'
 import { EmptyState, ErrorMessage, InfoMessage } from './ErrorMessage'
@@ -424,22 +424,22 @@ export function BackgroundCheckSection({
               // 선택은 됐지만 상세가 아직 없다. 미완결 건은 백엔드가 외부 동기화를
               // 겸해서 이 구간이 수십 초일 수 있다. 반드시 표시가 있어야 한다.
               //
-              // 스피너만 있으면 조회 자체가 진행 중인 것으로 읽혀 목록의 완료
-              // 배지와 모순돼 보인다. 이미 아는 상태(목록의 배지)를 함께 보여
-              // "조회는 끝났고 세부를 받아오는 중"임이 드러나게 한다.
-              <div className="space-y-3 px-3 py-8">
-                {(() => {
-                  const summary = displayHistory?.find(
-                    (h) => h.id === selectedId,
-                  )
-                  return summary ? (
-                    <div className="flex justify-center">
-                      <CheckStatusBadge status={displayStatus(summary)} />
-                    </div>
-                  ) : null
-                })()}
-                <Spinner label="세부 결과를 불러오는 중..." />
-              </div>
+              // 스피너만 두지 않고 요약으로 같은 틀을 그린다. 상세가 있을 때와
+              // 없을 때 패널 모양이 다르면(행이 있다가 사라지면) 화면이 로딩
+              // 여부에 따라 널뛴다. 모르는 값만 "확인 중"으로 남는다.
+              (() => {
+                const summary = displayHistory?.find((h) => h.id === selectedId)
+                return (
+                  <div className="space-y-3 p-3">
+                    {summary && (
+                      <CheckResult
+                        check={placeholderDetail(summary, employee.id)}
+                      />
+                    )}
+                    <Spinner label="세부 결과를 불러오는 중..." />
+                  </div>
+                )
+              })()
             ) : (
               <div className="space-y-3 p-3">
                 <CheckResult check={selected} />

@@ -54,16 +54,25 @@ export function CheckResult({ check }: { check: BackgroundCheckDetail }) {
         {/* 완결 전에는 판정을 보여주지 않는다. 세부 없이 "추가 검토 필요"부터
             뜨면 결과가 나온 것으로 읽힌다. src/checks.ts 참조. */}
         <CheckStatusBadge status={displayStatus(check)} />
-        <span className="font-mono text-xs text-slate-400">
-          {check.check_id}
-        </span>
+        {/* 자리표시(요약만 있는 상태)에서는 외부 id를 아직 모른다 */}
+        {check.check_id && (
+          <span className="font-mono text-xs text-slate-400">
+            {check.check_id}
+          </span>
+        )}
       </div>
 
       <div className="rounded-md bg-slate-50 px-3 py-2">
         <p className="text-xs text-slate-500">외부로 전송한 이름</p>
         <p className="mt-1 text-sm text-slate-800">
-          성 <strong>{check.sent_last_name}</strong> · 이름{' '}
-          <strong>{check.sent_first_name}</strong>
+          {check.sent_last_name ? (
+            <>
+              성 <strong>{check.sent_last_name}</strong> · 이름{' '}
+              <strong>{check.sent_first_name}</strong>
+            </>
+          ) : (
+            <span className="text-slate-400">확인 중</span>
+          )}
         </p>
       </div>
 
