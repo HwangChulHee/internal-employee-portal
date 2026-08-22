@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import * as checksApi from '../api/backgroundChecks'
 import type { BackgroundCheckDetail } from '../api/types'
+import { isFinal } from '../checks'
 
 const POLL_INTERVAL_MS = 3000
 const MAX_ATTEMPTS = 10
@@ -38,11 +39,12 @@ export function useCheckPolling(
   const [error, setError] = useState<string | null>(null)
 
   const targetId = target?.id ?? null
-  // 폴링 조건은 pending뿐이다. completed_at이 비어 있는 완료 건의 동기화는
-  // 조회 생성 직후 GET 한 번(BackgroundCheckSection.submitRequest)이 맡는다.
-  // "completed_at === null이면 폴링"으로 넓히면, 외부 API가 완료 응답에
-  // completedAt을 주지 않는 경우 폴링이 무의미하게 10회 반복된다.
-  const shouldPoll = target?.status === 'pending'
+  // 완결(status 확정 + completed_at 존재) 전까지 폴링한다.
+  // pending만 조건으로 삼으면, POST가 즉시 flagged를 반환했지만 동기화가
+  // 실패한 반동기화 레코드가 수동 재시도 없이는 영원히 비어 있다.
+  // 화면은 완결 전 상태를 전부 "조회 중"으로 표시하므로 폴링 조건과 표시가
+  // 일치한다. 외부가 completedAt을 끝내 주지 않아도 MAX_ATTEMPTS에서 멈춘다.
+  const shouldPoll = target !== null && !isFinal(target)
 
   // 선택된 항목이 바뀌면 표시 상태를 초기화한다.
   // effect 대신 렌더 중에 처리한다(React가 권장하는 prop 변화 대응 방식).
@@ -73,7 +75,7 @@ export function useCheckPolling(
         onUpdate(data)
         attempts += 1
 
-        if (data.status !== 'pending') {
+        if (isFinal(data)) {
           setPolling(false)
           return
         }

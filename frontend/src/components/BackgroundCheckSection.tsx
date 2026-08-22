@@ -10,6 +10,7 @@ import type {
   Page,
 } from '../api/types'
 import { CheckStatusBadge } from './Badge'
+import { displayStatus, isFinal } from '../checks'
 import { formatDateTime } from '../format'
 import { CheckResult } from './CheckResult'
 import { EmptyState, ErrorMessage, InfoMessage } from './ErrorMessage'
@@ -73,17 +74,6 @@ const INITIAL: CheckState = {
   requesting: false,
   error: null,
   ambiguous: null,
-}
-
-/**
- * 완결된 조회인가. status가 pending이 아니고 세부까지 동기화됐다면
- * (completed_at 채워짐) 백엔드는 이 레코드를 다시는 수정하지 않는다.
- * 다시 받아와도 같은 값이므로 재조회하지 않는다. 재조회를 걸면
- * 완료된 결과 밑에 스피너가 클릭마다 깜빡이고, 동기화가 덜 된 외부 API
- * 상황에서는 불필요한 외부 호출까지 늘어난다.
- */
-function isFinal(check: BackgroundCheckDetail | undefined): boolean {
-  return check !== undefined && check.status !== 'pending' && check.completed_at !== null
 }
 
 function merge(
@@ -313,9 +303,11 @@ export function BackgroundCheckSection({
   // 애초에 못 누르게 하는 것이 설계의 1차 방어선이다(docs/04 중복 방지).
   // 캐시(details)도 함께 본다. pending은 항상 1페이지 맨 위에 오지만,
   // 다른 페이지를 보는 동안에도 폴링이 캐시를 최신으로 유지하고 있다.
+  // 기준은 표시 규칙과 같은 displayStatus다. 화면에 "조회 중"이 보이는데
+  // 버튼만 열려 있으면 그것대로 모순이다. 완결되는 순간 함께 풀린다.
   const hasPending =
-    (displayHistory?.some((h) => h.status === 'pending') ?? false) ||
-    [...details.values()].some((d) => d.status === 'pending')
+    (displayHistory?.some((h) => displayStatus(h) === 'pending') ?? false) ||
+    [...details.values()].some((d) => !isFinal(d))
 
   // 스피너는 상태 조합에서 파생시킨다.
   // detailLoading: 선택한 항목의 상세 응답을 기다리는 중 (느린 동기화 포함)
@@ -323,7 +315,8 @@ export function BackgroundCheckSection({
   //   이유는, 폴링 밖 경로(새로고침 등)로 완료가 확인되면 플래그가 해제되기 전에
   //   상태가 먼저 바뀔 수 있기 때문이다. 완료된 결과 위에 스피너를 남기지 않는다.
   const detailLoading = selectedId !== null && loadingId === selectedId
-  const showPolling = polling && selected?.status === 'pending'
+  const showPolling =
+    polling && selected !== null && !isFinal(selected)
 
   return (
     <section className="rounded-lg bg-white p-5 ring-1 ring-slate-200">
@@ -399,7 +392,9 @@ export function BackgroundCheckSection({
                       <span className="text-xs text-slate-600">
                         {formatDateTime(h.requested_at)}
                       </span>
-                      <CheckStatusBadge status={h.status} />
+                      {/* 완결 전에는 실제 status가 무엇이든 "조회 중"으로.
+                          결과 패널과 같은 규칙(src/checks.ts)이다. */}
+                      <CheckStatusBadge status={displayStatus(h)} />
                     </button>
                   </li>
                 ))}
@@ -439,7 +434,7 @@ export function BackgroundCheckSection({
                   )
                   return summary ? (
                     <div className="flex justify-center">
-                      <CheckStatusBadge status={summary.status} />
+                      <CheckStatusBadge status={displayStatus(summary)} />
                     </div>
                   ) : null
                 })()}
@@ -452,27 +447,10 @@ export function BackgroundCheckSection({
                   <Spinner label="결과를 불러오는 중..." />
                 )}
                 {showPolling && <Spinner label="결과를 기다리는 중..." />}
-                {/* 완료됐는데 세부 동기화가 안 된 상태. 외부 API가 응답하지 않아
-                    동기화가 무산되면 여기 남는다. 안내 없이 두면 "완료인데 값이
-                    없는" 화면이 고장으로 읽히므로, 사유와 재시도 수단을 준다. */}
-                {!isFinal(selected) &&
-                  selected.status !== 'pending' &&
-                  !detailLoading && (
-                    <div className="space-y-2">
-                      <InfoMessage message="조회는 완료되었지만 세부 결과를 아직 받아오지 못했습니다. 외부 서비스가 응답하면 채워집니다." />
-                      <button
-                        type="button"
-                        onClick={() => openDetail(selected.id)}
-                        className="rounded-md px-3 py-1.5 text-sm text-slate-600 ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
-                      >
-                        다시 불러오기
-                      </button>
-                    </div>
-                  )}
                 <ErrorMessage message={pollError} />
-                {/* 소진 안내는 아직 pending일 때만 보인다. "다시 확인"으로
-                    완료가 확인되면 결과만 남기고 안내는 치운다. */}
-                {exhausted && selected.status === 'pending' && (
+                {/* 소진 안내는 완결 전(조회 중 표시)일 때만 보인다.
+                    "다시 확인"으로 완결되면 결과만 남기고 안내는 치운다. */}
+                {exhausted && !isFinal(selected) && (
                   <div className="space-y-2">
                     {/* 실패가 아니다. 실패로 적으면 재요청을 시도했다가 409를 만난다. */}
                     <InfoMessage message="조회가 진행 중입니다. 잠시 후 다시 확인해 주세요." />
