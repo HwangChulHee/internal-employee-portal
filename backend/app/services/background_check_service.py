@@ -8,12 +8,14 @@
 """
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from fastapi import status as http_status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.external.base import (
     BackgroundCheckClient,
     CheckRequest,
@@ -64,10 +66,18 @@ async def request_check(
 
     # 진행 중 조회 검사. 더블클릭과 재클릭을 막는 실질적 방어선이다.
     # 경쟁 조건까지 막는 선점 패턴은 쓰지 않기로 했다(발생 확률 대비 복잡도 초과).
+    #
+    # 창(requested_at 조건)이 있어야 한다. pending이 영원히 pending이면
+    # (외부가 조회를 잃어버린 경우 등) 이 검사가 그 직원의 신규 조회를
+    # 영원히 막는 교착이 된다. 창을 넘긴 pending은 진행 중으로 치지 않는다.
+    window_start = datetime.now(UTC) - timedelta(
+        seconds=settings.CHECK_IN_PROGRESS_WINDOW_SECONDS
+    )
     in_progress = await db.scalar(
         select(BackgroundCheck).where(
             BackgroundCheck.employee_id == target.id,
             BackgroundCheck.status == CheckStatus.PENDING,
+            BackgroundCheck.requested_at > window_start,
         )
     )
     if in_progress is not None:

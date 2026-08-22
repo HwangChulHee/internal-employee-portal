@@ -1,5 +1,8 @@
 import type { BackgroundCheckDetail, BackgroundCheckListItem, CheckStatus } from './api/types'
 
+/** 화면 전용 상태. 저장 상태 3개에 파생 상태 하나를 얹는다. */
+export type CheckDisplayStatus = CheckStatus | 'stalled'
+
 /**
  * 완결된 조회인가. status가 pending이 아니고 completed_at까지 채워져야 완결이다.
  *
@@ -19,16 +22,24 @@ export function isFinal(
 }
 
 /**
- * 화면에 표시할 상태. 완결 전에는 실제 status가 무엇이든 "조회 중"으로 보여준다.
+ * 화면에 표시할 상태.
  *
- * 완료시각도 세부도 없는데 "추가 검토 필요"부터 뜨면 관리자는 결과가 나온 것으로
- * 읽는다. 판정 배지는 결과(세부 4필드 + 완료시각)와 함께 한 번에 나타나야 한다.
+ * - 완결 → 실제 판정. 완료시각도 세부도 없는데 "추가 검토 필요"부터 뜨면
+ *   관리자는 결과가 나온 것으로 읽는다. 판정은 결과와 함께 한 번에 나타난다.
+ * - 미완결 + 진행 중(서버 판정) → "조회 중"
+ * - 미완결 + 창 초과 → "응답 없음". 실패라고 적지 않는다 — 외부에 실패
+ *   상태가 없어 실패 여부를 알 수 없고, 뒤늦게 완료되면 판정으로 바뀐다.
+ *
  * 목록 배지와 결과 패널이 같은 규칙을 쓰므로 서로 어긋나지 않는다.
  */
 export function displayStatus(
-  check: Pick<BackgroundCheckDetail | BackgroundCheckListItem, 'status' | 'completed_at'>,
-): CheckStatus {
-  return isFinal(check) ? check.status : 'pending'
+  check: Pick<
+    BackgroundCheckDetail | BackgroundCheckListItem,
+    'status' | 'completed_at' | 'in_progress'
+  >,
+): CheckDisplayStatus {
+  if (isFinal(check)) return check.status
+  return check.in_progress ? 'pending' : 'stalled'
 }
 
 /**
@@ -58,5 +69,6 @@ export function placeholderDetail(
     requested_at: item.requested_at,
     completed_at: item.completed_at,
     created_by: 0,
+    in_progress: item.in_progress,
   }
 }

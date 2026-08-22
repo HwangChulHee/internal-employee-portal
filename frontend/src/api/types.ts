@@ -117,6 +117,12 @@ export interface BackgroundCheckListItem {
   status: CheckStatus
   requested_at: string
   completed_at: string | null
+  /**
+   * 서버가 계산한 "진행 중" 판정. 미완결이면서 요청이 시간 창(서버 설정)
+   * 안에 있을 때 true다. 창을 넘긴 pending은 화면에 "응답 없음"으로
+   * 표시되고 새 조회를 막지 않는다. 프론트가 같은 창을 따로 들지 않는다.
+   */
+  in_progress: boolean
 }
 
 export interface BackgroundCheckDetail {
@@ -135,6 +141,8 @@ export interface BackgroundCheckDetail {
   requested_at: string
   completed_at: string | null
   created_by: number
+  /** 목록과 같은 서버 계산 판정. BackgroundCheckListItem 참조. */
+  in_progress: boolean
 }
 
 /** 복성 확정이 필요할 때 409와 함께 오는 구조화된 본문. */

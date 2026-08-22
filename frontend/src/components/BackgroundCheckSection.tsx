@@ -303,11 +303,22 @@ export function BackgroundCheckSection({
   // 애초에 못 누르게 하는 것이 설계의 1차 방어선이다(docs/04 중복 방지).
   // 캐시(details)도 함께 본다. pending은 항상 1페이지 맨 위에 오지만,
   // 다른 페이지를 보는 동안에도 폴링이 캐시를 최신으로 유지하고 있다.
-  // 기준은 표시 규칙과 같은 displayStatus다. 화면에 "조회 중"이 보이는데
-  // 버튼만 열려 있으면 그것대로 모순이다. 완결되는 순간 함께 풀린다.
+  // 기준은 서버가 계산한 in_progress다. 화면의 "조회 중"과 같은 판정이라
+  // 배지와 버튼이 어긋나지 않고, 시간 창을 넘긴 pending(응답 없음)은
+  // 잠금에서 빠져 교착이 생기지 않는다. 완결되는 순간 함께 풀린다.
+  //
+  // 같은 항목을 목록과 상세 캐시가 서로 다른 시점에 관찰했을 수 있다.
+  // in_progress는 시간이 지나며 true → false로만 변하므로(완결되거나 창을
+  // 넘기거나), 두 관찰의 AND가 곧 더 최신의 판정이다. 어느 한쪽만 믿으면
+  // 낡은 true가 이겨 "배지는 응답 없음/완료인데 버튼만 잠긴" 화면이 된다.
+  const listedIds = new Set(displayHistory?.map((h) => h.id) ?? [])
   const hasPending =
-    (displayHistory?.some((h) => displayStatus(h) === 'pending') ?? false) ||
-    [...details.values()].some((d) => !isFinal(d))
+    (displayHistory?.some(
+      (h) => h.in_progress && (details.get(h.id)?.in_progress ?? true),
+    ) ??
+      false) ||
+    // 다른 페이지에 있는 항목은 캐시로만 판정한다.
+    [...details.values()].some((d) => !listedIds.has(d.id) && d.in_progress)
 
   // 스피너는 상태 조합에서 파생시킨다.
   // detailLoading: 선택한 항목의 상세 응답을 기다리는 중 (느린 동기화 포함)
@@ -452,8 +463,14 @@ export function BackgroundCheckSection({
                     "다시 확인"으로 완결되면 결과만 남기고 안내는 치운다. */}
                 {exhausted && !isFinal(selected) && (
                   <div className="space-y-2">
-                    {/* 실패가 아니다. 실패로 적으면 재요청을 시도했다가 409를 만난다. */}
-                    <InfoMessage message="조회가 진행 중입니다. 잠시 후 다시 확인해 주세요." />
+                    {/* 실패라고 적지 않는다. 외부에 실패 상태가 없어 알 수 없다. */}
+                    <InfoMessage
+                      message={
+                        displayStatus(selected) === 'stalled'
+                          ? '외부 응답이 오랫동안 없습니다. 새 조회를 요청할 수 있고, 이 조회는 응답이 오면 채워집니다.'
+                          : '조회가 진행 중입니다. 잠시 후 다시 확인해 주세요.'
+                      }
+                    />
                     <button
                       type="button"
                       onClick={recheck}
