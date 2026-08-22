@@ -426,8 +426,10 @@ POST /api/employees
 
 - Network 탭: `POST /api/employees/2/background-checks` → 201
 - 응답의 `status`가 `pending`이면, 이어서 `GET /api/background-checks/{id}`가
-  **3초 간격**으로 반복된다 (폴링)
-- 완료되면 폴링이 멈추고 결과가 표시된다
+  **3초 간격**으로 반복된다 (폴링). 폴링 중에는 요청 버튼이 비활성화된다
+- 응답이 곧바로 `clear`/`flagged`면 GET이 **한 번만** 나간다.
+  생성 응답에는 세부 결과가 없어, 이 GET이 동기화된 완전한 레코드를 받아온다
+- 완료되면 폴링이 멈추고 결과가 표시된다. 목록 배지도 함께 바뀐다
 - 결과에 **전송한 이름**(first=민준, last=김)이 함께 보인다
 - DB:
   ```sql
@@ -549,7 +551,7 @@ USE_FAKE_API=true FAKE_MODE=always_503 uv run uvicorn app.main:app --reload
 | `always_500` | 백오프 1초 → 2초로 재시도 |
 | `fail_then_succeed` | 2회 실패 후 3번째 성공 → 201 |
 | `timeout` | POST 타임아웃 → 사전 확인 → 재시도 → 504 |
-| `always_pending` | 폴링이 정확히 10회에서 멈추고 "진행 중" 안내 + [다시 확인] 버튼 |
+| `always_pending` | 폴링이 정확히 10회에서 멈추고 "진행 중" 안내 + [다시 확인] 버튼. pending이 있는 동안 요청 버튼 비활성 |
 | `always_400` | 재시도 없이 1회로 끝 |
 
 ### 설계 포인트
